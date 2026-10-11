@@ -1,7 +1,8 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 10/10/2026 (UTC+07:00).  
-**Giai đoạn hiện tại:** khảo sát nguồn và kiểm chứng parser trên pilot; chưa crawl toàn bộ corpus.
+**Cập nhật:** 11/10/2026 (UTC+07:00).
+
+**Giai đoạn hiện tại:** parser v2.2 đã kiểm chứng trên 10.000 mẫu cũ, 1.000 URL mới và 40 URL của hai nguồn mở lại. Đã tạo full plan; sẵn sàng bắt đầu crawl có kiểm soát, chưa chạy toàn bộ corpus.
 
 Tài liệu này ghi kết quả đã thu được. Các bước thiết kế chưa triển khai được đánh dấu riêng; hướng giải quyết tổng thể nằm trong [PROPOSED_SOLUTION.md](PROPOSED_SOLUTION.md).
 
@@ -33,7 +34,7 @@ Bốn host chiếm khoảng 60,68% corpus. Vì các host còn lại vẫn chiế
 
 Đã ghi giải pháp trong `PROPOSED_SOLUTION.md`: ưu tiên thu thập, làm sạch và chunking; baseline ban đầu dùng một sparse retriever và một dense retriever. Chưa chọn checkpoint cuối cùng, chưa triển khai hoặc đo chất lượng retrieval.
 
-Đã thống nhất nguyên tắc lưu raw cùng ID/URL/trạng thái trước khi parse để có thể sửa parser mà không tải lại. Hướng chia việc nhiều máy là chia shard theo ID chính thức, chẳng hạn `doc_id % 128`; đây mới là thiết kế, chưa có crawler phân tán. Tốc độ theo host cần được quản lý tổng thể khi nhiều máy cùng chạy.
+Đã thống nhất nguyên tắc lưu raw cùng ID/URL/trạng thái trước khi parse để có thể sửa parser mà không tải lại. Crawler hiện đã hỗ trợ chia theo `doc_id % shard_count` từ cùng kế hoạch. Chưa có bộ điều phối tốc độ tập trung giữa các máy; mỗi máy tự giảm tốc độ theo số shard.
 
 ## 3. Audit host và template — đã chạy pilot
 
@@ -124,12 +125,297 @@ Kết quả pilot chưa thể suy rộng thành tỷ lệ thành công cho 4,4 t
 
 Các cảnh báo có thể chồng lấp trên cùng bản ghi. Ngoài bảng còn có trang danh sách, chỉ mục chương, placeholder, câu hỏi không có answer và marker chưa render; chi tiết nằm trong báo cáo.
 
-## 7. Bước tiếp theo — chưa thực hiện
+## 7. Crawler và đợt mở rộng — đã triển khai, đã hoàn tất
 
-1. Duyệt mẫu đại diện từng template, ưu tiên cảnh báo và vùng ngoài selector; ghi rõ template nào đủ tin cậy để crawl.
-2. Viết crawler theo đợt: giữ ID chính thức, lưu raw/trạng thái, resume, retry có giới hạn, chia shard và kiểm soát tốc độ theo host.
-3. Crawl một đợt mở rộng để phát hiện template mới và đo throughput, dung lượng, tỷ lệ tải/parse trước khi mở rộng toàn bộ nguồn truy cập được.
-4. Xử lý ngoại lệ theo độ phủ và chi phí; ưu tiên nội dung text/QA có thể lấy ổn định.
-5. Thiết kế chunking từ các block sạch, sau đó triển khai sparse + dense baseline và đầu ra theo đặc tả nộp bài.
+Đã thêm `scripts/crawl.py`, dùng lại parser hiện có, không thêm thư viện ngoài `pyproject.toml`.
+
+- Lập kế hoạch chung trước khi chia shard; giữ nguyên ID và loại URL đã có trong pilot.
+- Lưu response nén gzip trước khi parse; checkpoint từng URL bằng SQLite.
+- Chạy tiếp các URL chưa hoàn thành; khóa shard để tránh hai tiến trình cục bộ cùng ghi.
+- Tối đa 12 request đồng thời, tuần tự theo hostname với khoảng cách mặc định 1,5 giây. Redirect/retry cũng qua giới hạn.
+- Timeout, giới hạn kích thước response, retry có giới hạn, xử lý `Retry-After` và tạm dừng host sau ba lỗi truy cập liên tiếp.
+- Xuất manifest, tài liệu, summary và báo cáo review mẫu; có chế độ chỉ export hoặc parse lại raw mà không tải mới.
+- Giảm tốc độ mỗi máy theo số shard; chưa bảo đảm giới hạn tổng nghiêm ngặt giữa các máy.
+
+Đã tạo **10.000 URL mới trên 80 host** tại `artifacts/crawl/plan.jsonl`. Ba host `fk.99.com.cn`, `mega.vietnamplus.vn`, `special.vietnamplus.vn` có HTML pilot nhưng không còn URL mới trong corpus. Các host không có HTML pilot chưa được đưa vào đợt này; danh sách loại được in khi lập kế hoạch.
+
+Lấy tối đa 20 URL ban đầu mỗi host, phần còn lại phân bổ theo căn bậc hai số URL, xen kẽ nhóm thành phần đầu đường dẫn. Phân bổ này phục vụ kiểm chứng độ đa dạng, không đại diện tỷ trọng corpus và chưa xác nhận mọi template.
+
+Snapshot đã xuất trước khi chạy tiếp:
+
+| Kết quả đợt mở rộng | Số bản ghi |
+|---|---:|
+| Đã lưu checkpoint | 1.187 |
+| Có text | 1.152 |
+| `extracted_unreviewed` | 1.019 |
+| `needs_review` | 133 |
+| `encoded_content` | 21 |
+| `unknown_template` | 3 |
+| HTTP error | 4 |
+| Chuyển về trang chủ | 5 |
+| Không phải HTML | 2 |
+| Chưa hoàn thành tại snapshot | 8.813 |
+
+Chưa ghi nhận `parser_error` trong snapshot. Ba trang chưa khớp template là `713530` (infographic VOV2), `856747` (People Health), `2052399` (chỉ mục y án ZYDCD). Được giữ nguyên raw và trạng thái để duyệt; chưa kết luận nguyên nhân hoặc độ đầy đủ.
+
+Đã xuất kết quả checkpoint rồi khởi chạy tiếp cùng kế hoạch. Sau đó đã dừng tiến trình nền theo yêu cầu người dùng, xuất đầy đủ kết quả đã lưu. Người dùng tiếp tục chạy trực tiếp và hoàn tất 10.000 URL. Các file JSONL/review là snapshot lần xuất gần nhất, không cập nhật theo từng URL; summary được cập nhật theo `--progress-every` (mặc định 25 URL) và khi kết thúc.
+
+Checkpoint khi dừng: **6.891/10.000 URL (68,9%)**, còn **3.109 URL**; **6.757 bản ghi có text**, gồm 5.871 `extracted_unreviewed`, 887 `needs_review`; có 24 `unknown_template` và không ghi nhận `parser_error`. Raw, SQLite, JSONL và báo cáo mẫu đã được giữ. Không còn tiến trình crawler nền do agent khởi chạy.
+
+Đã bổ sung `--resume` (yêu cầu checkpoint có sẵn), `--status` (đọc tiến độ trực tiếp, không tải), `--progress-every` (tần suất in tiến độ). Chế độ shard dùng `--shard-count`/`--shard-id`; `--status` và `--resume` áp dụng theo shard được chọn. Đợt hiện tại giữ cấu hình một shard để tiếp tục đúng checkpoint.
+
+## 8. Kiểm tra chất lượng đợt 10.000 — đã thực hiện
+
+Kết quả cuối cùng được xuất lúc **21:49 ngày 10/10/2026 (UTC+07:00)**. Nguồn kiểm tra: `artifacts/crawl/shard-000-of-001/{pages.jsonl,documents.jsonl,state.sqlite,raw/}`. Không tải thêm URL và không sửa/parse lại toàn bộ kết quả trong vòng review này.
+
+### Kết quả định lượng
+
+| Kết quả | Số bản ghi | Tỷ lệ trên 10.000 |
+|---|---:|---:|
+| Đã hoàn thành checkpoint | 10.000 | 100% |
+| HTML response | 9.840 | 98,40% |
+| Có text | 9.737 | 97,37% |
+| `extracted_unreviewed` | 8.316 | 83,16% |
+| `needs_review` | 1.423 | 14,23% |
+| `unknown_template` | 55 | 0,55% |
+| `encoded_content` | 46 | 0,46% |
+| HTTP error | 65 | 0,65% |
+| Chuyển về trang chủ | 55 | 0,55% |
+| Response rỗng | 32 | 0,32% |
+| Không phải HTML | 5 | 0,05% |
+| Access challenge | 2 | 0,02% |
+| Fetch error | 1 | 0,01% |
+| `parser_error` | 0 | 0% |
+
+Hai bản ghi có media nhưng không có text khiến tổng hai trạng thái trích xuất là 9.739, khác 9.737 bản ghi có text. Các nhóm cảnh báo có thể chồng lấp.
+
+### Phạm vi kiểm tra và kết quả đạt được
+
+- Đối chiếu toàn bộ 10.000 ID/URL/host với plan, và ID/URL với Parquet chính thức: không có sai lệch; manifest và tài liệu đều đủ 10.000 bản ghi.
+- Giải nén và kiểm tra SHA-256, độ dài của toàn bộ **9.999 raw response** có đường dẫn: không có lỗi file hoặc sai hash. Một fetch error không có raw.
+- Đường dẫn raw và hash nguồn trong tài liệu đều khớp manifest.
+- Đọc thống kê/cảnh báo trên toàn bộ tài liệu; parse lại **160 mẫu, hai mẫu mỗi host**, từ raw với parser hiện tại: title, text, blocks, answers, warnings và status khớp kết quả lưu. Điều này xác nhận khả năng tái lập, không chứng minh mọi mẫu sạch.
+- Đối chiếu raw các nhóm bất thường: title rỗng, unknown template, bảng bị lệch chữ, phân trang, HTML còn trong text và khối gợi ý/quảng cáo.
+- Cập nhật file `artifacts/crawl/shard-000-of-001/review.html` hiện có với tập mẫu theo host và các dấu hiệu lỗi: tất cả unknown/title rỗng/phân trang đã phát hiện, ca đã xác nhận và hai mẫu mỗi host. Chỉ cập nhật báo cáo hiển thị, giữ nguyên raw, checkpoint và `documents.jsonl`.
+- Các phần `answers[].text` đều khớp các block tương ứng. Có 1.286 trang Q&A; 53 mẫu không có answer được cảnh báo riêng. Nội dung ngắn không tự động bị loại.
+- Có 366 tài liệu với text dưới 120 ký tự, nhiều mẫu là câu trả lời/chương sách/ngắn hoặc caption hợp lệ; không coi toàn bộ là lỗi.
+
+### Vấn đề đã xác nhận
+
+| Vấn đề | Bằng chứng / phạm vi | Ý nghĩa |
+|---|---|---|
+| Title rỗng nhưng nguồn có title | **86 mẫu**: 61 Baidu, 25 People Health; cả 86 đều có title hoặc heading không rỗng trong raw | `title_of` dừng ở node rỗng, bỏ qua fallback. Các mẫu hiện không được cảnh báo lỗi này. |
+| Bảng bị đọc lặp | **1 mẫu**, SKĐS `493463`; khi đối chiếu vùng DOM đã làm sạch có thêm 416 ký tự sau khi bỏ khoảng trắng/separator | Lỗi đọc cấu trúc bảng lồng/malformed; cảnh báo `block_text_mismatch` đã bắt được. Đây là lặp chữ, không phải mất 416 ký tự. |
+| Bài phân trang chưa lấy đủ | **32 mẫu** có text “下一页” và link trang tiếp theo trong raw: Wujue 26, CNKang 3, ba host 39.net mỗi host 1 | Crawler chỉ tải URL được cấp, chưa nối các trang tiếp theo. Text còn pager, chưa có cảnh báo thiếu phân trang. |
+| Nhiễu publisher lặp lại | **1.563 tài liệu** còn câu bản quyền 39.net trong text | Rule hiện chưa phủ các vị trí DOM chứa boilerplate; cần tách khỏi text retrieval, giữ provenance. |
+| Gợi ý bài còn trong body | `911500` (wei.39.net: “相关推荐”), `834086` (fk.39.net: “编辑推荐”) | Cả hai đang là `extracted_unreviewed`; wrapper đúng vẫn có thể chứa khối gợi ý. |
+| Khối quảng bá còn trong bài | `174333`, `174369` (MEDLATEC Store); `746491` (Vinmec hotline); `760445` (YouMed chat/app) | Cần rule theo cấu trúc/section. Không xóa toàn bộ đoạn chỉ vì có từ app/hotline. |
+| HTML còn ở dạng text | **11 ứng viên** có dấu hiệu tag trong text: 9 Q&A 120ask, 1 Woman39, 1 Bệnh viện Nhi; đã xác nhận ví dụ `1212271`, `923749` | Có escaped markup từ nguồn chưa được xử lý; ảnh trong markup có thể chưa thành resource. Cần phân biệt với văn bản thật. |
+| Wiki còn điều hướng | **402 tài liệu** chứa nhãn điều hướng wiki; toàn bộ 681 tài liệu wiki đã có `wiki_tail_requires_review` | Khối đuôi chưa sạch, cần phân loại cả trang file/attachment và sách/bệnh/thuốc. |
+
+Quét từ khóa còn phát hiện 62 ứng viên có câu đặt lịch/hotline (44 ở MEDLATEC), nhưng đây chỉ là danh sách cần đối chiếu, không phải 62 lỗi đã xác nhận. Mẫu `1313` của Bạch Mai thực sự hướng dẫn dùng ứng dụng khám bệnh; loại theo từ khóa sẽ làm mất nội dung hữu ích. Tương tự, “Đăng nhập” trong `760515` là chữ nằm ở phần trích nguồn, không phải menu đăng nhập.
+
+### Phân biệt template mới với vấn đề của nguồn
+
+55 `unknown_template` thuộc 14 host; CNKang chiếm 30. Đối chiếu raw xác nhận ít nhất **10 mẫu** là lỗi/thiếu nội dung nguồn, không đơn thuần thiếu selector:
+
+- Năm CNKang trả `Fatal error` dù HTTP 200: `1728056`, `1728067`, `1728069`, `3485054`, `3485056`.
+- Một 39.net chuyển sang `/web/404.html`: `812601`.
+- Một Vinmec báo không tìm thấy dữ liệu: `742721`.
+- Ba trang có vùng thân bài rỗng: Quảng Ninh `82817`, PMPHAI `2541307`, `2541601`.
+
+**45 mẫu còn lại cần phân loại/template bổ sung**, có cả bài cũ, longform, media, infographic và trang danh sách; không khẳng định cả 45 là bài text lấy được đầy đủ. Ví dụ Dân trí có `#desktop-cate-in-article`, VietNamNet longform có `.inner-contetn`; ZYDCD `2052399` là chỉ mục y án, không phải một y án đơn.
+
+CNKang có 59 HTTP 404 và 32 response rỗng trong 813 URL mẫu. Toàn bộ 65 HTTP error của đợt đều là 404, không phải 403/429. Vì vậy không nên tăng retry cho nhóm này để mong cải thiện độ phủ.
+
+### Nội dung chưa đầy đủ đã được cảnh báo
+
+- Wiki: 681; JB39 preview: 90; JBK chưa tải tab chi tiết: 132.
+- Section trả phí: 101; nội dung mã hóa: 46; quiz chưa có câu hỏi trong HTML: 3.
+- Ảnh chưa chuyển thành text: 63; media chưa xác minh transcript: 83; PDF chưa parse: 17; nội dung nhúng chưa parse: 120.
+
+52 ứng viên có đoạn dài ngoài selector đều thuộc ask.39.net, food.39.net, gc.39.net và wei.39.net. Nội dung quan sát được là hồ sơ bệnh/triệu chứng hoặc chuyên môn bác sĩ ở sidebar; đây là bằng chứng việc bỏ ngoài selector có thể đúng, không nên gom lại chỉ vì đoạn dài. Heuristic này không bao phủ mọi cách bỏ sót nội dung.
+
+Có ba nhóm hai ID có text trùng hoàn toàn, gồm alias thuốc hoặc hai URL của cùng nội dung. Chưa loại ID nào; deduplicate nội dung cần giữ mapping tới toàn bộ ID chính thức. Hai mẫu có ký tự replacement trong text cũng cần đối chiếu dữ liệu nguồn, dù decoder không ghi cảnh báo fallback/replacement.
+
+### Kết luận chất lượng và thứ tự sửa theo ROI
+
+Lớp tải/lưu dữ liệu hoạt động ổn trên tập đã chọn; raw đủ để sửa parser mà không crawl lại. **Chưa đủ cơ sở gọi 9.737 bản ghi có text là corpus sạch**, và `extracted_unreviewed` vẫn có false negative của hệ thống cảnh báo.
+
+1. Sửa fallback title, đọc bảng, boilerplate và khối gợi ý/quảng bá đã xác nhận; thêm cảnh báo title rỗng, escaped markup và phân trang. Chi phí thấp, có bằng chứng cụ thể và phạm vi ảnh hưởng lớn.
+2. Phân loại 55 unknown; bổ sung template cho các nhóm có nội dung, tách lỗi nguồn/empty body khỏi unknown. Giữ raw, không cần tải lại để sửa selector.
+3. Thiết kế theo link phân trang có quan hệ rõ với cùng bài, lưu phần bổ sung gắn `doc_id` gốc; chưa triển khai trong vòng review này.
+4. Parse lại raw sau khi sửa, duyệt lại mẫu lỗi và mẫu bình thường; sau đó mới quyết định mở rộng crawl/chunk.
+
+Chưa sửa parser, chưa thay đổi kết quả crawl và chưa chạy thêm crawl trong vòng kiểm tra chất lượng này.
+
+## 9. Hạ tầng lưu trữ V1 — thiết kế ban đầu OneDrive, 11/10/2026
+
+Đã cài rclone v1.75.2 tại `~/.local/bin/rclone` trên máy hiện tại, thêm `scripts/storage.py` và tích hợp upload batch vào crawler. Teammate cần tự cài rclone; Python vẫn dùng các dependency hiện có.
+
+### Cơ chế đã cài đặt
+
+- Cấu hình chung `storage.json` chứa remote/thư mục và `drive_id`. Mỗi máy đăng nhập rclone riêng; drive sai bị từ chối trước upload. Chưa tạo file này vì chưa đăng nhập OneDrive.
+- Đường dẫn cloud theo SHA-256 plan, shard và UUID batch; không ghi đè batch giữa các máy. Phân công vẫn dùng ID chính thức modulo số shard.
+- Đóng batch theo 10.000 document hoặc 256 MiB raw gzip. Giữ nguyên `.gz` trong `raw.tar`; lưu đủ pages/document/audit dưới JSONL gzip và manifest checksum.
+- Upload payload, đọc lại byte để kiểm SHA-256, rồi xuất manifest làm dấu hoàn tất. Batch chưa xác minh được giữ local và thử lại khi resume.
+- `--prune-local` chỉ dọn batch đã xác minh; SQLite giữ trạng thái/locator và document rút gọn. SQLite tái sử dụng phần trống; muốn giảm kích thước file ngay cần VACUUM khi đã dừng crawler. Các JSONL xuất cũ vẫn giữ nguyên.
+- `--cache-limit-gb` đặt mốc dừng cho raw/batch local; có thể vượt tạm thời trong khi đóng batch/request đang chạy. Không áp dụng cho SQLite/file export và không phải hạn ngạch đĩa cứng.
+- Có lệnh đọc document theo shard, khôi phục một raw và xuất document của tất cả shard từ OneDrive mà không cần SQLite trên máy indexing. Xuất remote chọn batch mới nhất cho từng ID, cần đồng bộ đồng hồ các máy.
+- Crawler thêm `--host-workers`, cho phép tải nhiều response trong cùng hostname nhưng vẫn giới hạn khoảng cách bắt đầu request, retry và redirect. Mặc định cũ 12 tổng/1 host/delay 1,5 giây được giữ.
+
+### Kết quả thao tác thực tế
+
+Đã chạy đóng batch trên checkpoint 10.000 mẫu. Trước khi đóng, kiểm SHA-256 raw giải nén với digest nguồn; không có lỗi khiến thao tác dừng.
+
+| Thành phần | Dung lượng byte |
+|---|---:|
+| `raw.tar` | 265.584.640 |
+| `pages.jsonl.gz` | 891.887 |
+| `documents.jsonl.gz` | 24.127.288 |
+| Tổng payload | 290.603.815 (~277,1 MiB) |
+
+Batch `d41e657764064425a66a2cbc5fed88cf`, plan SHA-256 `f3db74ca32b0e3e32c059d70accaedca5ccabb01b223024ad17e6692d3fa1464`, shard `000-of-001`. Trạng thái: **1 batch pending, 0 document chưa đóng**. Checkpoint vẫn đủ 10.000 kết quả; raw gốc chưa xóa, chưa compact SQLite và chưa đổi nội dung parser.
+
+Đã kiểm tra cú pháp Python và đọc trạng thái checkpoint/batch. **Chưa xác minh upload/download OneDrive thực tế**, vì cấu hình rclone hiện chưa có remote; cần người dùng đăng nhập Microsoft. Chưa đo tốc độ crawler sau thay đổi song song; chưa chạy thêm crawl hoặc khởi động crawler nền.
+
+Cấu hình khởi điểm đề xuất: 32 worker tổng, 2/host, delay 1,5 giây. Tăng tiếp 48–64 tổng/2–4 host tùy timeout, 429/5xx và tài nguyên máy; chưa có số worker tối đa đã đo. Giữ nguyên delay 1,5 giây thì riêng 963.438 URL CNKang có cận dưới khoảng 16,7 ngày, bất kể worker tổng. Các host bị chặn vẫn cần xử lý riêng.
+
+Hướng dẫn thao tác trong [README.md](README.md#google-drive-lưu-cuốn-chiếu-và-dùng-nhiều-máy). Chưa tự backup/khôi phục SQLite/plan từ cloud; giữ các file checkpoint local.
+
+## 10. Chuyển sang Google Drive — 11/10/2026
+
+Người dùng đổi đích lưu trữ sang Google Drive và đã đăng nhập rclone remote `gdrive` (backend `drive`). Đã cập nhật `scripts/storage.py`, CLI crawler và README để dùng đích này; dữ liệu/batch đã đóng được tái sử dụng.
+
+- Đã tạo thư mục `MedXIR`, ID `1tfvL8OJIRejT_c-4wfaQnTZecT67qJld`, và `storage.json` chứa remote, backend, folder ID và Shared Drive ID nếu có. File không chứa token/mật khẩu; có thể chia sẻ nguyên file cho các máy.
+- Mọi thao tác cloud cố định `root_folder_id` theo ID thư mục trên. Hai tài khoản có thư mục trùng tên không dẫn upload sang hai nơi. Tài khoản teammate khác phải có quyền sửa vào cùng thư mục.
+- Thêm `storage.py prepare --plan PLAN --shard-count N` để một máy tạo các thư mục plan/shard chung trước khi các máy bắt đầu. Google Drive cho phép tên thư mục trùng; bước chuẩn bị tuần tự tránh việc hai máy tạo các thư mục cha trùng nhau. Crawler yêu cầu thư mục shard đã được chuẩn bị.
+- Đã chuẩn bị layout cho plan hiện tại, một shard; chưa thay đổi số shard/checkpoint và chưa khởi động crawl mới.
+
+### Upload thực tế đã hoàn tất
+
+Batch `d41e657764064425a66a2cbc5fed88cf` chứa đủ 10.000 bản ghi đã upload vào:
+
+```text
+MedXIR/runs/f3db74ca32b0e3e32c059d70accaedca5ccabb01b223024ad17e6692d3fa1464/
+  shard-000-of-001/batches/d41e657764064425a66a2cbc5fed88cf/
+```
+
+Ba payload tổng 290.603.815 byte (~277,1 MiB) và manifest đều được đọc lại qua rclone và **khớp SHA-256** với bản local. Checkpoint ghi batch **verified**. Lần này chạy `upload` không có `--prune-local`: raw, batch local, full document trong SQLite và các bản xuất cũ vẫn giữ nguyên. Chưa chạy VACUUM.
+
+Remote báo quota **429.496.729.600 byte (400 GiB)** và **398.653.978.817 byte (~371,3 GiB) trống** trước upload; đây là quota Google Drive thực tế, không phải 5 TB OneDrive đã đề cập trước đó. Kích thước toàn corpus cần tiếp tục đo khi phân bố host thay đổi.
+
+Đã kiểm cú pháp Python và đọc trạng thái local. Xác minh lần này là upload/download byte thực tế trong cơ chế lưu trữ; chưa đo crawler với số worker mới, chưa chạy crawl nền và chưa sửa parser. Hướng dẫn hiện hành ở [README.md](README.md#google-drive-lưu-cuốn-chiếu-và-dùng-nhiều-máy); thư mục cloud [MedXIR](https://drive.google.com/drive/folders/1tfvL8OJIRejT_c-4wfaQnTZecT67qJld).
+
+## 11. Parser v2.1 và hướng dẫn CLI — 11/10/2026
+
+Đã sửa `scripts/content_parser.py` dựa trên các trường hợp trong raw của đợt 10.000 URL, giữ ID và URL chính thức. Không tải thêm URL nguồn.
+
+### Các thay đổi đã cài đặt
+
+- Bổ sung fallback cho Dân trí, VietNamNet longform, CNKang bài cũ/recipe/listing, VOV/VOV2, Care39, chuyên đề Man39, ZYDCD và video SKĐS. Giữ sapo/heading/body theo thứ tự DOM.
+- Title fallback tiếp tục tìm khi node hoặc meta rỗng, thay vì kết thúc với title rỗng.
+- Đọc bảng theo DOM để tránh lặp text ở hàng/cell lồng hoặc thiếu thẻ đóng; giữ cấu trúc hàng cho bảng dữ liệu. Vẫn đối chiếu text vùng đã chọn với các block và cảnh báo nếu không khớp.
+- Cleanup thông báo publisher/editor, các khối link gợi ý, store card MEDLATEC, booking CTA Vinmec và app promotion YouMed theo cấu trúc đã xác nhận. Không áp dụng xóa hàng loạt bằng từ khóa; hướng dẫn ứng dụng trong bài Bach Mai được giữ. `removed` lưu text/link/lý do của phần loại.
+- Chuyển escaped HTML có tag được nhận diện thành DOM, giữ caption/heading/tài nguyên; lưu bản trước chuyển trong `normalizations` và cảnh báo.
+- Tách `source_error` cho fatal error, soft 404 và Vinmec báo không tìm thấy dữ liệu; `empty_content` cho vùng bài thật sự rỗng; `unknown_template` dành cho trang chưa tìm được vùng nội dung.
+- Ghi `pagination_links` và cảnh báo phần tiếp theo chưa tải. Loại nút điều hướng khỏi text; không nhận link chuyển chương sách/tab chi tiết khác ID là phân trang cùng bài. Chưa tải trang tiếp theo.
+- Giữ URL video từ widget/data attribute, URL ảnh/audio/PDF cùng caption nếu có. Gallery/infographic được ghi thiếu text trong ảnh, không coi mô tả ngắn là đã lấy đủ nội dung.
+
+### Thao tác và tài liệu
+
+Crawler có `--parse-workers` để reparse bằng process CPU, `--force-reparse` để áp dụng lại cùng version, và tiến độ reparse trực tiếp. Mặc định reparse bỏ qua document đã cùng version để tiếp tục sau khi dừng. `--status` và summary ghi phân bố parser version. Worker reparse tách riêng `--workers`/`--host-workers` dùng cho HTTP.
+
+README đã ghi lệnh parser độc lập, crawl, prepare, resume, status, reparse thường/ép, export, chia shard, thay plan/output, cloud và toàn bộ tùy chọn crawler/parser. Danh mục template được cập nhật các selector/cleanup đã cài đặt.
+
+### Kết quả parse lại toàn bộ 10.000 raw
+
+Lượt cuối dùng `--reparse --force-reparse --parse-workers 4`, hoàn tất khoảng **300,8 giây** trên máy hiện tại. Sau đó xuất lại JSONL/summary và báo cáo mẫu 250; số mẫu HTML thực tế bị giới hạn bởi các nhóm host/trạng thái. Toàn bộ 10.000 document có `parser_version = parser-v2.1`, không gửi request mới tới website nguồn. Đã kiểm cú pháp Python; không thêm thư viện hoặc bộ test mới.
+
+| Chỉ tiêu | Trước sửa (`pilot-v1`) | Sau sửa (`parser-v2.1`) |
+|---|---:|---:|
+| Bản ghi có text | 9.737 | **9.775** |
+| `extracted_unreviewed` | 8.316 | 8.173 |
+| `needs_review` | 1.423 | 1.611 |
+| `unknown_template` | 55 | **0** |
+| `source_error` | Chưa tách | 7 |
+| `empty_content` | Chưa tách | 3 |
+| `encoded_content` | 46 | 46 |
+| `parser_error` | 0 | 0 |
+| `block_text_mismatch` | 1 | **0** |
+| Title rỗng ở bản trích/needs_review | 86 | **0** |
+
+55 unknown cũ được phân thành **45 bản trích** (31 không có cảnh báo, 14 cần duyệt), **7 lỗi nguồn** và **3 vùng nội dung rỗng**. Có thêm 38 bản ghi chứa text; phần còn lại gồm trang media chỉ có tài nguyên. Không tính trang lỗi thành tài liệu đã lấy nội dung.
+
+- Bảng SKĐS `493463` giữ 6 hàng, không còn lặp chữ; 6 recipe CNKang giữ hàng/cell và không có mismatch. Hai bài CNKang chỉ có text/br `3506847`, `3507150` được khôi phục.
+- Mẫu Dân trí, VietNamNet longform, Care39, Man39, VOV/VOV2 và ZYDCD mới đã có vùng trích phù hợp. Infographic `713530` chỉ có mô tả và ảnh nên vẫn `needs_review`; gallery `923749` giữ caption/ảnh và dấu vết chuyển escaped markup.
+- 1.563 tài liệu trước đó chứa cụm publisher “未经书面授权”; còn **1** (`855409`) do chung đoạn với lời nhắc phương thuốc lấy từ mạng và cần thận trọng. Rule xóa nguyên thông báo không xóa đoạn có thêm thông tin này. `834086`, `911500` đã loại khối related/publisher; `174333`, `174369`, `746491`, `760445` đã xử lý các CTA/store/app đã xác nhận.
+- 5 title còn thiếu thuộc các trang PHP fatal error, không thuộc bản trích nội dung.
+
+`needs_review` tăng vì nhận diện thêm media/gallery/infographic, pagination và chuẩn hóa escaped HTML, cùng các template mới. Số bản ghi không cảnh báo giảm không đồng nghĩa mất dữ liệu; số liệu này cũng không chứng minh mọi nội dung đã sạch.
+
+**Còn thiếu:** 31 tài liệu có phân trang chưa lấy phần tiếp; 46 payload mã hóa; cảnh báo 73 trang có text trong ảnh chưa chuyển, 195 trang media chưa xác minh transcript, 17 PDF và 148 nội dung nhúng chưa parse. Ngoài ra còn 101 trang trả phí, 90 preview JB39, 132 tổng quan JBK thiếu tab chi tiết, 681 wiki cần duyệt đuôi và 53 QA không có answer trong HTML. Các nhóm chồng lấp. Không còn unknown trong 10.000 mẫu không bảo đảm mọi template của 4,4 triệu URL đã được bao phủ.
+
+Kết quả hiện tại ở `artifacts/crawl/shard-000-of-001/documents.jsonl`, `summary.json` và `review.html`. Pilot/báo cáo cũ vẫn là kết quả lịch sử cho tới khi tự chạy lại notebook; raw gốc được giữ để xử lý tiếp.
+
+### Xuất bản kết quả mới lên Google Drive
+
+Đã chạy `storage.py upload` sau reparse, tạo batch **`4ea9a3ff320e4132bb26600c88640726`** chứa 10.000 bản ghi v2.1, cùng plan/shard và thư mục Drive ở mục 10. Ba payload và manifest đã được đọc lại, khớp SHA-256; checkpoint ghi `verified = 1` và mọi document trỏ tới batch mới.
+
+| Thành phần | Dung lượng byte |
+|---|---:|
+| `raw.tar` | 265.584.640 |
+| `pages.jsonl.gz` | 891.887 |
+| `documents.jsonl.gz` | 25.430.030 |
+| Tổng payload | 291.906.557 (~278,4 MiB) |
+
+Batch v1 cũ vẫn giữ trên cloud/local để đối chiếu, cùng các ID với batch mới; không phải 10.000 tài liệu mới. `export-remote` chọn bản trong batch mới hơn. Raw vẫn được đóng lại trong batch mới theo cơ chế V1, nên cloud tăng thêm khoảng 278,4 MiB; chưa tách riêng kho raw để dùng chung qua nhiều phiên bản parser. Không dùng `--prune-local`, chưa compact document hoặc VACUUM, không khởi động crawler tải URL nền.
+
+## 12. Parser v2.2 và khả năng chạy full — 11/10/2026
+
+### Parser và nguồn mới
+
+- Giải mã payload CMS Phú Thọ/Thanh Hóa theo JavaScript công khai của CMS (alphabet/rotate/Base64); không chạy JavaScript tùy ý. Kiểm tra cấu trúc HTML sau decode, giữ payload gốc và đường dẫn nguồn. **46/46 mẫu cũ và 19/19 mẫu pilot đã giải mã**; không coi chuỗi mã hóa là text.
+- Long Châu đã truy cập lại được: lấy trường đúng bài từ `__NEXT_DATA__`, kiểm tra slug, giữ mô tả, triệu chứng, nguyên nhân, nguy cơ, chẩn đoán/điều trị, sinh hoạt/phòng ngừa, FAQ và tham khảo. Loại danh sách sản phẩm/bài/bệnh gợi ý. Sáu hồ sơ bệnh có phần hữu ích nằm ngoài nội dung HTML ban đầu; đã giữ đủ các trường hiện có và 5 FAQ mỗi hồ sơ.
+- Việt Đức: hai bố cục `.news-primary-content .edittor-content` và `.news-primary-content`; giữ nội dung và tác giả trong bài, loại chia sẻ/tag/gợi ý. Selector đầu tiên quá hẹp gây 3 unknown, gate đã tạm dừng đúng; bổ sung fallback rồi parse lại và hoàn tất phần còn lại.
+- Reparse toàn bộ pilot và cập nhật báo cáo HTML local bằng v2.2. Không còn unknown, encoded hay mismatch trong pilot; số có text là 1.578/1.820 (gồm trạng thái fetch/skip cũ).
+
+### Kết quả đo được
+
+| Đợt | Hoàn thành | Có text | Unknown / encoded / parser error / mismatch |
+|---|---:|---:|---:|
+| 10.000 mẫu cũ, reparse raw | 10.000 | 9.821 | 0 / 0 / 0 / 0 |
+| 1.000 URL mới, không trùng mẫu cũ | 1.000 | 964 | 0 / 0 / 0 / 0 |
+| Long Châu + Việt Đức, 20 URL mỗi host | 40 | 40 | 0 / 0 / 0 / 0 |
+
+Reparse 10.000 mẫu mất khoảng 226,3 giây với 4 process. 1.611 bản cần duyệt; không đồng nghĩa 9.821 bản đều đủ nội dung hoặc hoàn toàn sạch.
+
+**179 mẫu cũ không có text:** 65 HTTP 404, 55 redirect về trang chủ, 32 response rỗng, 7 lỗi nội dung nguồn, 5 non-HTML, 3 vùng body rỗng, 2 challenge, 1 lỗi fetch và 9 trang media chỉ có tài nguyên. Không có trường hợp còn mất text do decoder trong 46 mẫu đã sửa.
+
+**36 mẫu mới không có text:** 28 CAPTCHA/challenge, 3 HTTP 404, 3 redirect trang chủ, 1 non-HTML và 1 media. Các challenge đã hoàn thành với trạng thái lỗi được giữ lại; không báo thành công hoặc tự retry chúng. Sau cooldown, 5 URL pending thuộc nhóm nguồn tạm dừng đã tải được với giới hạn mới.
+
+### Crawler và lưu trữ
+
+- Thêm giới hạn chung theo nhóm subdomain 39.net/familydoctor/iiyi, áp dụng cả retry/redirect. Chờ semaphore/delay không bị tính là timeout HTTP.
+- Pause nguồn khi lỗi truy cập liên tiếp hoặc parser unknown/error/encoded/mismatch vượt gate; giữ pause trong SQLite qua resume. `--retry-paused` chỉ mở lại URL pending; còn pending thì kết thúc exit code 2.
+- Thêm `--all-hosts`, `--include-host`, `--exclude-completed`; skipped pilot chưa fetch không bị loại khỏi full plan. Checkpoint nhập theo batch và cờ `plan_loaded` tránh nhập lại hàng triệu dòng khi resume.
+- Cache checksum/tar theo batch khi đọc raw cloud; kiểm tra digest raw local. Chỉ dọn batch đã upload và xác minh.
+- **7 kiểm tra offline đã đạt**, gồm shard ID không liên tục, loại ID đã làm, pause/resume, giới hạn subdomain, hàng đợi/timeout, bảng lỗi HTML, payload CMS sai, trường ẩn Long Châu và pack/verify/prune/restore raw.
+- Batch v2.2 **`eabafa6fc7d347649b547038bd5e1420`** của 10.000 ID đã upload và đọc lại xác minh SHA-256; giữ local. Payload gồm raw.tar 265.584.640 byte, pages.jsonl.gz 891.887 byte và documents.jsonl.gz 25.573.468 byte (tổng 292.049.995 byte). Ba batch cloud là ba phiên bản của cùng ID, không cộng thành 30.000 tài liệu. Hai đợt 1.000/40 mẫu mới còn local.
+
+### Phạm vi full và kết luận
+
+Reprobe 14 nguồn cũ: Long Châu/Việt Đức mở lại, 12 nguồn còn lỗi/chặn. **85 host với 3.632.818 URL** đã có bằng chứng HTML nội dung; **12 host với 761.900 URL** chưa truy cập được. Nhóm 39.net vẫn có CAPTCHA theo thời điểm.
+
+Đã tạo `artifacts/crawl_full/plan.jsonl`, **4.381.984 URL**, loại hợp 12.734 ID đã thử/hoàn thành từ các đợt trước. Plan bao gồm mọi host còn URL (90 host); toàn corpus có 97 host. Đã đối chiếu plan: 4.381.984 ID duy nhất, mọi ID/URL khớp corpus; không thiếu ID ngoài hợp loại trừ và không trùng ID đã loại. Chia modulo 2: shard 0 có 2.190.903 URL, shard 1 có 2.191.081 URL. Khởi tạo checkpoint shard 0 mất 15,69 giây, peak RSS 71.932 KiB; mở lại/export không nhập lại plan mất 0,99 giây. Đã chuẩn bị thư mục Drive cho hai shard. Không khởi chạy full crawl. Lệnh chính thức cho hai máy, resume/status, storage và giới hạn nguồn nằm trong [README.md](README.md#chạy-toàn-bộ-corpus).
+
+**Kết luận:** đủ khả năng bắt đầu full crawl có kiểm soát và giữ nguồn để sửa parser sau. Chưa thể xác nhận sẽ lấy đủ nội dung 4,4 triệu URL. Cảnh báo phân trang (31 mẫu cũ), media/PDF/ảnh, QA thiếu đáp án và vùng preview/paywall còn tồn tại; không tự biến chúng thành bản hoàn chỉnh cho indexing. Theo delay 2 giây, riêng CNKang có cận dưới khoảng 22,3 ngày; đây không phải cam kết thời gian hoàn thành.
+
+## 13. Bước tiếp theo
+
+1. Chạy full plan trực tiếp theo shard; theo dõi batch đầu, nguồn pause, tỷ lệ text/cảnh báo và dung lượng theo host.
+2. Xử lý host bị chặn khi có phương án truy cập thực sự; mở lại pending sau khi xác minh, tránh retry liên tục.
+3. Duyệt cảnh báo thiếu nội dung, bổ sung phân trang/media theo ROI trước khi chunk các nhóm đó.
+4. Hợp kết quả các đợt theo doc_id, thiết kế chunking từ block/QA và triển khai sparse + dense baseline.
 
 **Chưa hoàn thành:** crawl toàn bộ, chunking, indexing, retrieval, reranking, benchmark và bài nộp.
