@@ -1,255 +1,212 @@
-# Giải pháp ViBioMIR — Version 1
+# Gi?i ph?p ViBioMIR ? Version 2
 
-**Phiên bản:** 1.0  
-**Ngày:** 09/10/2026 (UTC+07:00)  
-**Trạng thái:** Đề xuất thiết kế; chưa triển khai hoặc benchmark hệ thống.
+**Phi?n b?n:** 2.0  
+**Ng?y:** 12/10/2026 (UTC+07:00)  
+**Tr?ng th?i:** ?? xu?t thi?t k?; ch?a tri?n khai ho?c benchmark pipeline n?y.
 
-Tài liệu này mô tả giải pháp ban đầu cho MedXIR, dựa trên quy định cuộc thi, khảo sát trực tiếp dữ liệu được cấp và đánh giá chi phí–lợi ích của các phương pháp truy hồi. Các quyết định về model, số lượng ứng viên và ngưỡng chọn kết quả sẽ được chốt bằng thực nghiệm.
+## 1. H??ng tri?n khai ?? ch?t
 
-## 1. Mục tiêu và phạm vi
-
-Với mỗi câu hỏi y khoa bằng tiếng Việt, hệ thống cần tìm các tài liệu và đoạn văn bản liên quan trong corpus đa ngôn ngữ, sau đó xuất ID tài liệu cùng đoạn trích nguyên bản. Hai đầu ra được đánh giá riêng ở cấp document và chunk.
-
-Đội thi tự xây dựng toàn bộ quy trình từ danh sách URL: thu thập, trích xuất, phân đoạn, lập chỉ mục, truy hồi và chọn kết quả. Trong phiên bản đánh giá hiện tại, chỉ tài liệu có ID thuộc `links_corpus.parquet` được tính là nhãn dương.
-
-Mục tiêu của V1 là tạo một pipeline có thể chạy từ dữ liệu nguồn đến bài nộp hợp lệ, đo được chất lượng và chi phí từng tầng. Ưu tiên đầu tư vào độ phủ corpus, độ chính xác của văn bản trích xuất, truy hồi đa ngôn ngữ và cách chọn tập kết quả theo F2.
-
-Theo [OVERVIEW.md](OVERVIEW.md), mô hình sử dụng phải được công khai theo quy định, có kích thước không quá 15B và phát hành trước ngày 01/08/2026. Khi chọn checkpoint, cần ghi model ID, revision, ngày phát hành và cấu hình sử dụng; các bước dịch, mở rộng query hoặc tạo dữ liệu bổ trợ cũng phải tuân thủ quy định này.
-
-## 2. Những gì đã biết về dữ liệu
-
-Các số dưới đây được đọc trực tiếp từ hai file Parquet trong `dataset/` ở thời điểm khảo sát, thay vì chỉ lấy từ README.
-
-| Đặc điểm | Kết quả |
-| --- | ---: |
-| Số truy vấn | 1.200 |
-| ID truy vấn | 1–1.200, không trùng |
-| Nội dung truy vấn | Không trùng, không rỗng |
-| Số bản ghi corpus | 4.394.718 |
-| ID tài liệu | Nhỏ nhất 583, lớn nhất 4.420.561; có khoảng trống |
-| URL | Không trùng, không rỗng |
-| Số host khác nhau | 97 |
-
-README ghi 4.420.561 liên kết, khác số bản ghi trong file hiện có. Hệ thống phải lấy danh sách ID thực tế làm căn cứ; không tạo ID bằng số thứ tự dòng hoặc giả định ID liên tục.
-
-| Host lớn nhất | Số URL |
-| --- | ---: |
-| `www.cnkang.com` | 963.438 |
-| `www.120ask.com` | 918.479 |
-| `www.familydoctor.com.cn` | 447.453 |
-| `ask.39.net` | 337.375 |
-
-Bốn host này chiếm khoảng 60,68% corpus. Trong danh sách host đã khảo sát chưa thấy PubMed/PMC. Đây là căn cứ ưu tiên khảo sát nguồn tiếng Trung và tiếng Việt, nhưng chưa đủ để kết luận tỷ lệ ngôn ngữ của nội dung hay phân bố nhãn liên quan. Ngôn ngữ phải được xác định từ văn bản tải về.
-
-Các truy vấn đã xem gồm câu hỏi về triệu chứng, xét nghiệm, thuốc, trẻ em và tình huống cá nhân, chẳng hạn:
-
-> “Răng có lỗ chấm đen, chảy máu khi thức dậy là sao?”
-
-> “Con tôi 10 tháng bị sốt hết rồi giờ phát ban khắp người có sao không”
-
-> “Suy giảm thị lực có phải do đau đầu hay tác dụng phụ của Topiramate?”
-
-Mẫu này gợi ý rằng tuổi, thời gian, phủ định, diễn tiến và quan hệ giữa triệu chứng với thuốc có thể ảnh hưởng mạnh đến độ liên quan. Cần giữ những chi tiết đó khi xử lý query. Đây mới là quan sát trên mẫu, chưa phải phân loại toàn bộ 1.200 câu hỏi.
-
-Hai file được cấp chỉ có `id/query` và `id/url`. Chưa có nội dung tài liệu, nhãn ngôn ngữ, chunk hay nhãn liên quan trong dữ liệu cục bộ.
-
-## 3. Cách chấm quyết định thiết kế
-
-Theo [EVALUATION.md](EVALUATION.md), Precision, Recall và F2 được tính cho từng truy vấn rồi lấy trung bình macro. Cần báo cáo riêng hai cấp document và chunk; tài liệu hiện có chưa quy định cách kết hợp chúng thành một điểm chung.
-
-Ở cấp document, với tập dự đoán D và tập tham chiếu G:
+Pipeline d? ki?n:
 
 ```text
-Precision = |D ∩ G| / |D|
-Recall    = |D ∩ G| / |G|
-F2        = 5 × Precision × Recall / (4 × Precision + Recall)
+Crawl ? Clean b?ng rule theo host/template ? B? sung metadata
+      ? G?n nh?m ICD-10 ? Chunk ? BM25 + Qwen 4B retrieval
+      ? Ch?n t?i li?u v? ?o?n ngu?n ? JSON/ZIP b?i n?p
 ```
 
-Khi các tập có phần tử, F2 cũng có thể viết thành `5 × TP / (4 × |G| + |D|)`. Recall được ưu tiên, nhưng tăng số tài liệu vẫn có thể làm giảm điểm. Ví dụ G có 10 tài liệu: dự đoán 10 và đúng 8 cho F2 = 0,80; dự đoán 20 và đúng 9 cho F2 = 0,75.
+X?y d?ng to?n b? pipeline tr?n ti?ng Vi?t tr??c v? xu?t ???c b?i n?p h?p l?. Sau ?? b? sung ti?ng Anh, ??nh gi? m?c t?ng ch?t l??ng, r?i m?i b? sung ti?ng Trung. M?i v?ng gi? ???c m?t baseline ho?n ch?nh ?? ??i chi?u v? quay l?i khi th? nghi?m m?i ch?a t?t h?n.
 
-Ở cấp chunk, văn bản được chuẩn hóa NFKC, giải mã HTML entity, chuyển chữ thường và gộp khoảng trắng. Một chunk được tính đúng khi khớp một chunk tham chiếu thuộc cùng truy vấn và cùng `doc_id`, với:
+Trong t?i li?u n?y, ?Qwen 4B? ???c hi?u l? **Qwen3-Embedding-4B** cho nh?nh dense retrieval. ??y l? c?u h?nh d? ki?n c?n benchmark; model reranker l? m?t l?a ch?n ri?ng, ch?a ch?t. Model nh? d?ng g?n ICD-10 c?ng ???c ch?n ri?ng theo chi ph? v? ch?t l??ng.
 
-```text
-overlap(c, g) = LCS_tokens(c, g) / |g| >= 0,40
-```
+## 2. Corpus m?i v? ph?m vi t?ng v?ng
 
-LCS giữ thứ tự token nhưng không yêu cầu các token liên tiếp. Mẫu số là độ dài chunk tham chiếu. Nếu mở rộng chunk dự đoán mà giữ nguyên chuỗi token ban đầu, LCS không giảm; công thức overlap không phạt trực tiếp phần văn bản nguồn được thêm vào.
+Theo th?ng b?o c?p nh?t c?a BTC ng?y 12/10/2026, corpus m?i g?m:
 
-Các hệ quả cho thiết kế:
+| Ng?n ng? | S? URL | Th? t? x? l? |
+| --- | ---: | --- |
+| Ti?ng Vi?t | 714.469 | V?ng 1 |
+| Ti?ng Anh | 240.000 | V?ng 2 |
+| Ti?ng Trung | 240.000 | V?ng 3 |
+| **T?ng** | **1.194.469** | |
 
-- Đánh giá riêng đơn vị dùng để tìm kiếm và vùng văn bản dùng để nộp. Có thể tìm bằng chunk nhỏ rồi xuất một cửa sổ nguồn rộng hơn.
-- Thử đoạn đơn, đoạn cùng hàng xóm, section và toàn bộ nội dung chính của bài hỏi đáp ngắn.
-- Theo đặc tả hiện tại, đổi thứ tự cùng một tập kết quả không đổi các chỉ số. Reranker cần giúp chọn tập kết quả hoặc vùng văn bản tốt hơn.
-- Điều chỉnh số lượng kết quả và ngưỡng giữ lại bằng thực nghiệm, tránh chốt top-K cố định theo trực giác.
+Ngu?n: [AIGuruTinix/ViBioMIR](https://huggingface.co/datasets/AIGuruTinix/ViBioMIR), file `links_corpus_vi_en_zh.parquet`, ???c l?u c?c b? t?i `dataset/links_corpus.parquet`.
 
-Các điểm chưa rõ cần đối chiếu với scorer chính thức: tokenizer; giới hạn độ dài và số chunk; cách tính recall khi một chunk khớp nhiều nhãn; xử lý chunk trùng; và quy ước cho tập rỗng. Kết luận về lợi ích của mở rộng chunk còn phụ thuộc các chi tiết này.
+File c?c b? m?i ?? ???c ki?m tra ?? 1.194.469 d?ng, kh?ng tr?ng ID v? c? hai c?t `id`, `url`. Phi?n b?n dataset ???c t?i t?i revision `9abdb40438c29498ea32068116a12eb78051ec4d`; SHA-256 Parquet l? `9e34cb4b7d6424b80ed2634ada581ea9e2d97da69c245d80bdbb31413a78e8ce`.
 
-## 4. Kiến trúc đề xuất cho V1
+Nh?m quy?t ??nh crawl l?i to?n b? corpus m?i. ID ch?nh th?c ph?i ???c gi? nguy?n; kh?ng ??nh s? l?i theo d?ng, shard ho?c ng?n ng?. Plan m?i kh?ng d?ng checkpoint hay danh s?ch lo?i tr? c?a l?n crawl tr??c.
 
-```mermaid
-flowchart TD
-    A[URL và ID chính thức] --> B[Thu thập và lưu bản nguồn]
-    B --> C[Trích xuất nội dung và cấu trúc]
-    C --> D[Chunk theo cấu trúc, giữ vị trí nguồn]
-    D --> E[BM25]
-    D --> F[Một dense index đa ngôn ngữ]
-    Q[Query tiếng Việt] --> E
-    Q --> F
-    Q --> T[Biến thể dịch và synonym có kiểm soát]
-    T --> E
-    T --> F
-    E --> G[Hợp nhất ứng viên]
-    F --> G
-    G --> H[Một reranker đa ngôn ngữ]
-    H --> I[Chọn tài liệu và vùng nội dung]
-    I --> J[Mở rộng đoạn từ văn bản nguồn]
-    J --> K[JSON và ZIP bài nộp]
-```
+Parquet kh?ng c? c?t ng?n ng?. C?n l?p manifest ng?n ng? t? th?ng tin ngu?n c?a BTC n?u c?; n?u kh?ng, d?ng mapping host l?m nh?n d? ki?n v? ki?m tra b?ng n?i dung th?c t? sau crawl. Trang ?a ng?n ng? ho?c kh?ng ch?c ch?n ph?i ???c ghi r?. Kh?ng suy ra ng?n ng? ch? t? mi?n `.com` hay `.vn`.
 
-Nhánh dịch và synonym được bật sau khi có baseline để đo lợi ích bổ sung. Mỗi tầng phải lưu đầu ra đủ để phân tích lỗi và chạy lại các thử nghiệm mà không phải thu thập hay embedding lại toàn bộ dữ liệu.
+### Ba v?ng ph?t tri?n
 
-### 4.1. Thu thập và trích xuất
+| V?ng | Corpus d?ng truy h?i | ??u ra b?t bu?c |
+| --- | --- | --- |
+| VI | Ti?ng Vi?t | Baseline v? b?i n?p cho ?? 1.200 query |
+| VI+EN | Gi? VI, th?m ti?ng Anh | B?i n?p m?i v? b?o c?o thay ??i so v?i VI |
+| VI+EN+ZH | Gi? VI+EN, th?m ti?ng Trung | B?i n?p m?i v? b?o c?o thay ??i so v?i VI+EN |
 
-Lập danh sách công việc theo host, lưu trạng thái tải, mã HTTP, URL sau chuyển hướng, thời điểm thu thập và lỗi. Hỗ trợ tiếp tục công việc còn thiếu và retry có kiểm soát. Lưu bản nguồn để có thể sửa parser mà không tải lại.
+Kh?ng ch? x? l? c? ba ng?n ng? m?i t?o b?i n?p ??u ti?n. Khi th?m m?t ng?n ng?, ch? x? l? v? embedding ph?n m?i n?u phi?n b?n clean, chunking v? model kh?ng ??i.
 
-Khảo sát mẫu trang theo host và loại trang trước khi mở rộng thu thập. Đo tỷ lệ tải thành công, lấy được nội dung chính, giữ được câu trả lời và mức nhiễu từ menu/quảng cáo. Ưu tiên nguồn theo cả quy mô, khả năng thu thập và đóng góp đo được vào truy hồi; tiếp tục mở rộng các nguồn còn lại để tránh mất độ phủ.
+## 3. Crawl v? l?u d? li?u ngu?n
 
-Parser cần giữ tiêu đề, heading, đoạn văn, danh sách, bảng và cấu trúc hỏi–đáp. Trang chỉ lấy được navigation hoặc thông báo lỗi phải được nhận diện. Tránh loại cả một host hay chủ đề chỉ vì đánh giá chất lượng y khoa chủ quan: mục tiêu chấm là truy hồi nhãn liên quan trong corpus.
+L?u HTML ho?c response g?c ?? s?a rule clean m? kh?ng ph?i t?i l?i. M?i URL c?n c? ID, URL g?c, URL sau redirect, th?i ?i?m t?i, m? HTTP, tr?ng th?i v? l?i. Crawl c?n checkpoint, resume v? c? ch? tr?nh g?i l?i URL ?? ho?n th?nh trong l?n crawl m?i.
 
-Nếu gộp nội dung trùng để giảm chi phí, vẫn giữ ánh xạ đến các ID nguồn. Không tự động xuất mọi ID trong một nhóm trùng; lựa chọn đó cũng cần đánh giá vì có thể tăng số dự đoán sai.
+D? li?u tr?n Drive d? ki?n t? ch?c d??i ba th? m?c `vi/`, `en/`, `zh/`. B?n trong m?i ng?n ng? ph?n bi?t d? li?u ngu?n, v?n b?n clean v? artifact ph?c v? retrieval; l?u theo shard/batch ?? x? l? ti?p t?ng ph?n.
 
-### 4.2. Văn bản nguồn và phân đoạn
+**Tr?ng th?i hi?n t?i:** ba th? m?c ng?n ng? ?? ???c t?o; crawler g?c ch?a ???c c?u h?nh ?? upload theo c?u tr?c n?y. Ph?n chia crawl gi?a c?c m?y ph?i b?o ??m m?i ID ch? c? m?t m?y ph? tr?ch.
 
-Mỗi tài liệu giữ ID chính thức, URL, ngôn ngữ được phát hiện, nội dung chính và vị trí các khối văn bản. Mỗi chunk giữ quan hệ với document, section và đoạn liền kề.
+B?o c?o ?? ph? theo ng?n ng? v? host: t?ng URL, t?i th?nh c?ng, c? n?i dung ch?nh, l?i, pending v? trang c?n ki?m tra. S? URL ?? x? l? kh?ng ??ng ngh?a v?i s? t?i li?u c? th? d?ng ?? retrieval.
 
-Hai biểu diễn cần được quản lý rõ ràng:
+## 4. Clean b?ng rule: AI ph?n t?ch m?u, code x? l? h?ng lo?t
 
-| Biểu diễn | Mục đích |
+### 4.1. Kh?o s?t host v? template
+
+L?y m?u HTML theo **host v? d?ng trang**, kh?ng ch? m?t trang tr?n m?i host. Ph?n nh?m ban ??u b?ng ???ng d?n URL, sau ?? ki?m tra c?u tr?c DOM ?? x?c ??nh template th?c t?. M?t host c? th? c? b?i vi?t, h?i ??p, trang danh m?c ho?c template c?/m?i; ???ng d?n gi?ng nhau ch?a ch?c c? c?ng layout.
+
+Cho AI ph?n t?ch m?u v? ?? xu?t:
+
+- V?ng n?i dung ch?nh, ti?u ?? v? heading.
+- C?u tr?c c?u h?i, c?u tr? l?i v? ph?n tr? l?i b? sung.
+- Selector v? quy t?c b? menu, qu?ng c?o, b?i li?n quan, footer ho?c widget.
+- D?u hi?u trang l?i, redirect v? trang ch? ho?c n?i dung kh?ng ??y ??.
+- C?ch gi? danh s?ch, b?ng, ch? th?ch v? th? t? kh?i v?n b?n.
+
+AI h? tr? ph?n t?ch v? vi?t rule. Vi?c clean to?n corpus ch?y b?ng code c? th? ki?m tra, t?i l?p v? ??nh phi?n b?n. Kh?ng d?ng AI vi?t l?i v?n b?n ngu?n l?m `chunk_text`.
+
+Model h? tr? ph?t tri?n/parser c?ng c?n ???c ??i chi?u v?i quy ??nh s? d?ng model trong [OVERVIEW.md](OVERVIEW.md); n?u vai tr? c?ng c? h? tr? ph?t tri?n ch?a r?, c?n x?c nh?n v?i BTC.
+
+### 4.2. Ki?m ch?ng v? ?p d?ng rule
+
+1. T?o m?u ??i di?n cho t?ng template v? gi? m?t ph?n m?u ?? ki?m tra ??c l?p.
+2. Vi?t rule, so s?nh HTML v?i n?i dung sau clean, ki?m tra m?t ?o?n v? nhi?u c?n s?t.
+3. Ch?y tr?n m?t batch, th?ng k? n?i dung r?ng, ?? d?i b?t th??ng v? l?i template.
+4. M? r?ng x? l? khi batch ??t ch?t l??ng; trang ch?a nh?n di?n ???c gi? tr?ng th?i c?n review.
+5. Khi rule ??i, ch?y l?i clean t? HTML ?? l?u v? ch? c?p nh?t artifact ch?u ?nh h??ng.
+
+Gi? nguy?n ph? ??nh, t?n thu?c, li?u l??ng, ??n v? x?t nghi?m, tu?i v? di?n ti?n th?i gian. Tr?nh rule x?a m?nh l?m m?t c?u tr? l?i ho?c b?ng y khoa. N?i dung kh?ng ??t ch?t l??ng ???c ??nh d?u ?? ki?m tra, kh?ng ?m th?m coi l? t?i li?u ?? clean th?nh c?ng.
+
+## 5. Metadata: t?i thi?u tr??c, m? r?ng sau
+
+Metadata b? sung nh? t?c gi?, ng?y xu?t b?n, chuy?n khoa v? th?c th? y khoa **ch?a ch?t**, s? thi?t k? sau khi c? corpus clean v? baseline.
+
+Ngay t? ??u v?n gi? c?c tr??ng c?n ?? qu?n l? d? li?u v? truy ng??c ngu?n:
+
+| Nh?m | Tr??ng d? ki?n |
 | --- | --- |
-| `embedding_text` | Có thể thêm tiêu đề và đường dẫn section để tăng ngữ cảnh |
-| `source_text` cùng vị trí nguồn | Dùng dựng đoạn trích nộp; truy ngược được về tài liệu |
+| ??nh danh | `doc_id`, URL g?c, URL cu?i, host |
+| N?i dung | ti?u ?? n?u l?y ???c, ng?n ng? d? ki?n/th?c t?, v?n b?n ngu?n |
+| Truy nguy?n | locator HTML, th?i ?i?m crawl, phi?n b?n rule, hash n?i dung |
+| Ch?t l??ng | tr?ng th?i crawl/clean, c?nh b?o, template nh?n di?n |
+| Chunk | `chunk_id`, `doc_id`, th? t?, section, v? tr? trong v?n b?n ngu?n |
 
-Quy tắc ban đầu: giữ nguyên bài hỏi đáp ngắn nếu nằm trong giới hạn đầu vào; chia bài dài theo heading và đoạn; section quá dài mới chia theo câu và giới hạn token. Overlap là một cấu hình thử nghiệm, vì nó cũng làm tăng số vector và ứng viên lặp.
+C?c field kh?ng l?y ???c ?? tr?ng v? ghi r? ngu?n g?c; kh?ng t? suy di?n th?nh metadata ch?c ch?n. Khi deduplicate, gi? mapping v? t?t c? ID ch?nh th?c v? ??nh gi? c?ch ch?n ID khi xu?t k?t qu?.
 
-Chưa chốt kích thước 400–700 token. Cần đo phân bố độ dài, giới hạn tokenizer của model và lỗi mất ngữ cảnh. Semantic chunking bằng embedding chỉ được bổ sung khi lỗi ranh giới có ảnh hưởng đáng kể.
+## 6. G?n nh?m ICD-10
 
-### 4.3. Query và truy hồi ứng viên
+M?c ti?u l? t?o nh?n ch? ?? h? tr? t? ch?c corpus, ph?n t?ch l?i v? th? c?i thi?n retrieval. Nh?n n?y kh?ng thay th? nh?n li?n quan c?a cu?c thi v? kh?ng ph?i ch?n ?o?n y khoa.
 
-Luôn giữ query gốc. Các biến thể dịch phải bảo toàn tuổi, phủ định, thuốc, giá trị xét nghiệm, thời gian và các ý hỏi. Không biến suy đoán chẩn đoán thành điều kiện truy hồi bắt buộc.
+H??ng th? nghi?m ban ??u:
 
-Thử dịch VI→ZH sớm dựa trên phân bố nguồn hiện có. VI→EN được đánh giá theo corpus tiếng Anh thực sự thu thập được. Synonym ban đầu giới hạn ở tên đồng nghĩa, viết tắt và tên hoạt chất có độ tin cậy cao. Với 1.200 query, có thể xử lý một lần và cache theo model, prompt và phiên bản cấu hình.
+1. Ch?n phi?n b?n ICD-10 v? c?p nh?m ph? h?p; x?y b?ng m?, t?n nh?m, m? t? v? thu?t ng? t??ng ?ng. Ghi ngu?n v? phi?n b?n b?ng nh?n.
+2. D?ng BM25 t?m nh?m ph? h?p v?i ti?u ?? v? n?i dung t?i li?u.
+3. D?ng model embedding nh? so s?nh v?n b?n v?i m? t? nh?m, r?i h?p nh?t ho?c ch?n l?i ?ng vi?n nh?n.
+4. L?u nhi?u nh?n n?u t?i li?u ?? c?p nhi?u nh?m; gi? ?i?m t?ng nh?nh, phi?n b?n model v? ph??ng ph?p g?n nh?n. ?i?m similarity ch?a ???c coi l? x?c su?t.
+5. Ki?m tra th? c?ng m?t m?u, ??c bi?t trang v? thu?c, x?t nghi?m v? t?i li?u nhi?u ch? ??. Cho ph?p `unknown` khi ch?a ?? b?ng ch?ng.
 
-BM25 sử dụng cách phân tích văn bản phù hợp với từng ngôn ngữ. Đặc biệt, cách tách token tiếng Trung phải được kiểm tra. Dense retriever sử dụng một model đa ngôn ngữ, chạy query gốc xuyên ngôn ngữ và thử thêm biến thể khi có lợi ích.
+T?n/m? t? nh?n c?n ph? h?p ng?n ng? t?i li?u v? truy v?n. Kh?ng c?ng tr?c ti?p ?i?m BM25 v? cosine n?u ch?a hi?u ch?nh thang ?i?m.
 
-Qwen3-Embedding-0.6B và 4B là ứng viên so sánh ban đầu; 8B được cân nhắc khi mức tăng chất lượng xứng đáng với tốc độ và tài nguyên. Chọn model trên tập dữ liệu đại diện trước khi embedding toàn corpus.
+Ban ??u ICD-10 ???c d?ng l?m metadata v? t?n hi?u h? tr?. Khi th? truy h?i theo nh?m, lu?n gi? nh?nh t?m tr?n to?n corpus. So s?nh c?u h?nh c?/kh?ng d?ng tag; l?c c?ng sai nh?m c? th? l?m m?t t?i li?u li?n quan. B??c tag kh?ng n?n ch?n vi?c xu?t baseline ti?ng Vi?t ??u ti?n khi c?n ?ang th? nghi?m.
 
-Hợp nhất ứng viên bằng RRF là cấu hình xuất phát:
+## 7. Chunking v? BM25 + Qwen 4B retrieval
 
-```text
-RRF(x) = Σ weight_m / (k + rank_m(x))
-```
+### 7.1. Chu?n b? chunk
 
-Không cộng trực tiếp vector từ các model có không gian khác nhau. Khi một nhánh có nhiều bản dịch hoặc mở rộng, cần kiểm soát tổng trọng số để tránh được ưu tiên chỉ vì có nhiều biến thể. Theo dõi số chunk và số document riêng biệt trong tập ứng viên; nhiều chunk của một document có thể chiếm hết ngân sách reranking.
+Gi? nguy?n b?i h?i ??p ng?n khi ph? h?p gi?i h?n ??u v?o; chia b?i d?i theo heading v? ?o?n, r?i m?i chia theo c?u n?u c?n. Ch?t ?? d?i v? overlap sau khi ?o ph?n b? v?n b?n v? th? retrieval tr?n m?u.
 
-### 4.4. Reranking và chọn kết quả
+M?i chunk c? hai bi?u di?n:
 
-Sử dụng một reranker đa ngôn ngữ; Qwen3-Reranker-4B là ứng viên, với bản 0.6B làm đối chứng chi phí. Số ứng viên rerank được chọn dựa trên recall ở bước truy hồi và thời gian xử lý thực tế.
+- `retrieval_text`: c? th? th?m ti?u ?? v? ng? c?nh section ?? l?p index.
+- `source_text`: v?n b?n tr?ch t? t?i li?u, k?m v? tr? v? th? t? ?? d?ng chunk n?p.
 
-Ở cấp document, so sánh cách lấy điểm chunk tốt nhất với cách tổng hợp một số đoạn bằng chứng khác nhau. Tránh để tài liệu dài được lợi đơn thuần vì có nhiều chunk. Ở cấp chunk, chọn các vùng nguồn có liên quan và kiểm soát đoạn lặp.
+Chunk n?p l?y t? ngu?n, kh?ng l?y t? ph?n m? t? ICD-10, b?n d?ch hay v?n b?n sinh. Gi? li?n k?t v?i ?o?n li?n k? ?? th? m? r?ng c?a s? ngu?n khi c?n.
 
-Thử riêng ngưỡng và số lượng kết quả cho hai đầu ra. Điểm reranker chưa phải xác suất liên quan đã được hiệu chỉnh. Cấu hình có số lượng kết quả thay đổi theo query chỉ được dùng khi kiểm chứng tốt hơn top-K trên tập đánh giá.
+### 7.2. Hai nh?nh t?m ki?m
 
-### 4.5. Xuất bài nộp
+**BM25:** l?p index t? v?n b?n clean/chunk, d?ng tokenization ph? h?p t?ng ng?n ng?. Khi th?m ti?ng Anh ho?c ti?ng Trung, ?o ri?ng BM25 v?i query ti?ng Vi?t g?c v? v?i b?n d?ch query; nh?nh lexical c?n c? t? ng? ph? h?p m?i match ???c t?t.
 
-Đầu ra gồm toàn bộ 1.200 ID query với `relevant_docs` và `relevant_chunks`; trường không có kết quả dùng danh sách rỗng. ID tài liệu dựa trên giá trị số nguyên trong corpus theo mô tả của [SUBMISSION.md](SUBMISSION.md); ví dụ dùng chuỗi trong tài liệu hiện chưa nhất quán với mô tả này.
+**Dense retrieval:** d? ki?n d?ng [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), model embedding ?a ng?n ng?, ?? encode chunk v? query. Pin model revision, c?u h?nh instruction, ?? d?i ??u v?o, s? chi?u v? chu?n h?a vector. Benchmark t?c ??, VRAM v? ch?t l??ng tr?n m?u tr??c khi ch?y to?n ph?n corpus c?a v?ng hi?n t?i.
 
-`chunk_text` được trích từ nguồn, bảo toàn nội dung và thứ tự. Tách cấu hình xuất đoạn khỏi cấu hình embedding để thử cửa sổ nguồn rộng hơn mà không lập lại index.
+H?p nh?t th? h?ng b?ng RRF l? c?u h?nh xu?t ph?t. Ch?t s? ?ng vi?n, tr?ng s? v? ng??ng ch?n b?ng th?c nghi?m. Khi m?t nh?nh c? nhi?u b?n d?ch query, ki?m so?t t?ng tr?ng s? c?a nh?nh ??.
 
-Kiểm tra đủ query, đúng kiểu dữ liệu, ID tài liệu tồn tại, `chunk_order` hợp lệ nếu có và đoạn trích truy ngược được về nguồn. ZIP chứa duy nhất một JSON ở thư mục gốc theo đặc tả.
+V?i c?c index ng?n ng? ri?ng, th? t?m ?ng vi?n trong t?ng index r?i h?p nh?t ?? ?o ph?n ng?n ng? m?i. Gi? c?ng c?u h?nh embedding cho c?c index ???c so s?nh. Theo d?i s? document kh?c nhau, tr?nh ?? nhi?u chunk c?a m?t b?i chi?m h?t t?p ?ng vi?n.
 
-## 5. ROI và các hướng nâng cấp
+### 7.3. Ch?n k?t qu?
 
-ROI trong tài liệu là mức ưu tiên dự kiến, chưa phải mức tăng điểm đã đo. Chi phí cần xét cả thời gian kỹ thuật, GPU, dung lượng, thời gian chạy và khả năng dùng lại hạ tầng.
+T?ng h?p ?i?m chunk th?nh ?i?m document; th? ?i?m chunk t?t nh?t v? t?ng h?p m?t s? ?o?n b?ng ch?ng. Ch?n document v? chunk theo c?u h?nh ?? ??nh gi?. Reranker ho?c d?ch query ???c th?m trong th? nghi?m ri?ng n?u l?i th?c t? cho th?y c?n thi?t.
 
-| Hạng mục | Ưu tiên V1 | Điều kiện hoặc lý do |
-| --- | --- | --- |
-| Thu thập, parser, giữ văn bản và ID | Rất cao | Tạo corpus mà các tầng sau có thể tìm kiếm |
-| Bộ đánh giá và phân tích lỗi | Rất cao | Cho phép ra quyết định bằng số liệu |
-| Chunk theo cấu trúc, giữ hỏi–đáp | Cao | Chi phí thấp, dễ kiểm tra |
-| BM25 + một dense retriever | Cao | Baseline hybrid có hai cách tìm ứng viên |
-| Dịch query, synonym giới hạn | Thử sớm | Chi phí chủ yếu trên 1.200 query, cache được |
-| Một reranker | Thử sớm | Cải thiện lựa chọn tập kết quả |
-| Mở rộng đoạn và điều chỉnh tập nộp | Cao | Tác động trực tiếp metric, ít chi phí lập index |
-| UMLS + CODER/SapBERT | Có điều kiện | Chứng minh lợi ích hơn dịch/synonym đơn giản |
-| BMRetriever/MedCPT | Có điều kiện | Phụ thuộc phần corpus tiếng Anh hữu ích |
-| LLM judge hoặc NLI | Để sau | Cần chứng minh lợi ích bổ sung sau reranker |
-| Semantic chunking, late chunking, RAPTOR | Hoãn | Chi phí và độ phức tạp cần được biện minh bằng lỗi thực tế |
+Theo [EVALUATION.md](docs/EVALUATION.md), Precision, Recall v? F2 ???c t?nh macro ri?ng cho document v? chunk. F2 ?u ti?n recall nh?ng v?n gi?m khi th?m qu? nhi?u k?t qu? sai. Chunk ???c ??i chi?u trong c?ng `doc_id`, d?ng overlap LCS token ??t ?t nh?t 40% sau chu?n h?a.
 
-UMLS đáng thử khi lỗi liên quan đến thuật ngữ hoặc liên kết concept xuất hiện thường xuyên. Tuy nhiên, chuỗi dịch → concept linking → mở rộng quan hệ có nhiều điểm phát sinh lỗi. Mapping đúng bệnh cũng chưa đảm bảo giữ đúng intent và hoàn cảnh của câu hỏi.
+## 8. ?o ??ng g?p khi th?m ng?n ng?
 
-BMRetriever/MedCPT ưu tiên biomedical tiếng Anh. Nhánh thứ hai chỉ được giữ khi tìm thêm tài liệu đúng mà baseline bỏ sót và cải thiện kết quả cuối. Sự khác nhau giữa model mới là giả thuyết về khả năng bổ sung, chưa phải bằng chứng về lợi ích ensemble.
+### 8.1. Gi? ph?p so s?nh c? th? di?n gi?i
 
-LLM judge có thể thử trên nhóm lỗi cụ thể. Trọng số giữa reranker, LLM và concept coverage cần hiệu chỉnh; chúng không tự cùng thang điểm. Một score mềm vẫn có thể làm mất recall khi dùng để cắt kết quả. NLI support/contradict cũng cần được chứng minh phù hợp với câu hỏi tư vấn mở.
+L?u baseline VI tr??c khi th?m EN, r?i l?u baseline VI+EN tr??c khi th?m ZH. M?i l?n thay corpus, gi? c?ng t?p query, b? nh?n ??nh gi?, model v? c?u h?nh ch?n k?t qu? ?? c? ph?p so s?nh ban ??u. Vi?c tune l?i c?u h?nh l? th? nghi?m ti?p theo, ghi ri?ng.
 
-## 6. Chi phí và khả năng mở rộng
+| Th?c nghi?m | M?c ??ch |
+| --- | --- |
+| VI: BM25, Qwen 4B, hybrid | ?o ??ng g?p t?ng nh?nh tr?n baseline ??u ti?n |
+| VI+EN so v?i VI | ?o l?i ?ch b? sung c?a t?i li?u ti?ng Anh |
+| VI+EN+ZH so v?i VI+EN | ?o l?i ?ch b? sung c?a t?i li?u ti?ng Trung |
+| C?/kh?ng ICD-10 tr?n c?ng corpus | ?o t?c d?ng c?a tag v? nguy c? m?t recall |
+| Query g?c/c? b?n d?ch tr?n c?ng corpus | Ki?m tra lexical match v? retrieval xuy?n ng?n ng? |
 
-Chưa có thông tin GPU, RAM, dung lượng đĩa hoặc ngân sách chạy. Vì vậy chưa chốt cấu hình model, thời gian embedding hay phương án ANN.
+B?o c?o document/chunk Precision, Recall v? F2; recall ?ng vi?n tr??c ch?n k?t qu?; t?i li?u ??ng m?i theo ng?n ng?; t?i li?u ??ng c? b? m?t; ?? ph? crawl/clean; dung l??ng index v? th?i gian x? l?.
 
-Ví dụ tính dung lượng: giả sử trung bình năm chunk trên mỗi tài liệu, corpus có khoảng 22 triệu vector. Dung lượng vector FP16 chưa nén xấp xỉ:
+D?ng c?ng t?p tham chi?u ?a ng?n ng? ?? so recall gi?a c?c v?ng. N?u ch? c? nh?n th? c?ng trong pool ?ng vi?n, g?i r? l? **recall tr?n pool ?? ??nh gi?**. N?u dashboard ch? tr? ?i?m t?ng, kh?ng suy ra recall ri?ng t? m?c t?ng/gi?m ?i?m ??. Kh?ng ??i b? nh?n ho?c ch? gi? nh?n thu?c ng?n ng? hi?n t?i r?i g?i ?? l? ph?p so s?nh recall gi?a c?c v?ng.
 
-| Số chiều | Dung lượng vector |
-| ---: | ---: |
-| 1.024 | 45 GB |
-| 2.560 | 112,5 GB |
-| 4.096 | 180 GB |
+### 8.2. Di?n gi?i khi recall kh?ng t?ng
 
-Chưa tính cấu trúc ANN, metadata, văn bản, bản nguồn và model. Số chunk trung bình là giả định minh họa, phải thay bằng số đo sau parsing. Giảm số chiều hoặc nén vector có thể giảm chi phí nhưng cần kiểm tra chất lượng; so sánh ANN với tìm kiếm chính xác trên một mẫu để tách lỗi index khỏi lỗi model.
+M?c ti?u l? ki?m tra t?i li?u EN/ZH c? gi?p t?m th?m k?t qu? li?n quan cho query ti?ng Vi?t hay kh?ng. **Recall kh?ng t?ng l? t?n hi?u c?n ph?n t?ch, ch?a ?? k?t lu?n model x? l? k?m ng?n ng? m?i.**
 
-Trước khi chạy toàn corpus, đo tốc độ embedding trên mẫu đại diện về ngôn ngữ và độ dài. Ước lượng tổng thời gian từ throughput và số token thực tế. Model tốt hơn trên benchmark tổng quát có thể có ROI thấp hơn nếu làm chậm việc mở rộng độ phủ corpus.
+C?c kh? n?ng c?n ph?n bi?t:
 
-Reranking 300 ứng viên cho 1.200 query là 360.000 cặp; LLM judge 50 ứng viên là 60.000 cặp. Chi phí mỗi cặp phụ thuộc độ dài đầu vào, batch và phần văn bản sinh. Cần đo trước khi coi tầng bổ sung là rẻ.
+- T?i li?u li?n quan ? ph?n m?i ch?a crawl ???c ho?c b? clean m?t n?i dung.
+- Corpus m?i kh?ng b? sung nhi?u nh?n li?n quan cho c?c query ?ang ??nh gi?.
+- Chunking ho?c tokenization l?m m?t b?ng ch?ng c?n t?m.
+- BM25 thi?u lexical match; dense model ch?a n?i ???c query VI v?i t?i li?u EN/ZH.
+- ?ng vi?n ??ng ?? ???c t?m nh?ng m?t ? b??c fusion, tag ICD-10, reranking ho?c c?t top-K.
+- T?i li?u m?i c?nh tranh v?i ?ng vi?n ??ng c? khi ng?n s?ch k?t qu? gi? nguy?n.
+- Nh?n ??nh gi? ch?a ?? ?? nh?n bi?t c?c t?i li?u m?i c? li?n quan.
 
-## 7. Kế hoạch đánh giá và triển khai
+?? ki?m tra gi? thuy?t v? model, ch?n c?c t?i li?u EN/ZH ?? ???c x?c nh?n li?n quan v? clean ??ng, r?i ?o kh? n?ng t?m ch?ng ? t?ng candidate. So query VI g?c v?i b?n d?ch ??ng, so BM25 v?i dense, v? ki?m tra k?t qu? tr??c/sau fusion. Ch? quy l?i cho kh? n?ng ng?n ng? khi ?? t?ch ???c c?c y?u t? n?y.
 
-Tạo một tập đánh giá nhỏ có người kiểm tra, bao phủ câu hỏi ngắn/dài, nhiều ý, triệu chứng, xét nghiệm, thuốc và các ngôn ngữ nguồn. Pool ứng viên nên lấy từ nhiều hệ để giảm thiên lệch về một retriever. Phân biệt nhãn sai với tài liệu chưa được đánh giá.
+N?u phi?n b?n m? r?ng ch?a t?t h?n, gi? b?i n?p baseline t?t nh?t trong khi s?a nguy?n nh?n; v?n l?u d? li?u m?i ?? ti?p t?c th? nghi?m.
 
-Nếu chỉ gán nhãn trong pool, recall đo được là recall trên pool đã đánh giá, chưa phải recall đầy đủ của cuộc thi. Pseudo-query có thể kiểm tra pipeline nhưng chưa đủ chứng minh mức tăng trên query thật. Dành phần query riêng cho kiểm tra cuối; hạn chế chỉnh cấu hình lặp lại theo leaderboard công khai.
+## 9. Artifact v? b?i n?p
 
-| Bước | Công việc | Kết quả cần đạt |
-| --- | --- | --- |
-| 1 | Khảo sát trang theo host, xây collector/parser | Đo độ phủ, tỷ lệ trích xuất và lỗi nguồn |
-| 2 | Lưu corpus, chunk cấu trúc, lập BM25 | Có baseline xuất được JSON trên corpus hiện có |
-| 3 | Tạo tập đánh giá, đo dense model trên mẫu | Chọn model theo chất lượng và chi phí |
-| 4 | Thêm dense retrieval và fusion | Đo tài liệu đúng được tìm thêm và recall ứng viên |
-| 5 | Thử dịch/synonym, thêm một reranker | Đo đóng góp riêng từng thay đổi |
-| 6 | Thử chọn tập và mở rộng đoạn | Tối ưu document F2 và chunk F2 riêng |
-| 7 | Mở rộng corpus, chạy đủ query, đóng gói | Bài nộp hợp lệ và cấu hình tái lập được |
+M?i v?ng l?u manifest ID, d? li?u clean, chunk, embedding/index, k?t qu? retrieval v? c?u h?nh. Cache theo hash n?i dung, phi?n b?n clean/chunk v? model revision; ti?p t?c t?ng shard sau gi?n ?o?n.
 
-Các mốc công khai trong đề bài là 31/10/2026 cho bài nộp public và 04/11/2026 cho hệ thống, lúc 23:59 UTC+07:00. Phân bổ thời gian thực tế cần dựa trên khảo sát tài nguyên và throughput; ưu tiên hoàn thành pipeline từ đầu đến cuối trước các nâng cấp có điều kiện.
+T?n b?i n?p d? ki?n:
 
-Mỗi thực nghiệm thay một thành phần, giữ cùng corpus và tập đánh giá. Ghi lại:
+- `submission_vi.json` / `.zip`.
+- `submission_vi_en.json` / `.zip`.
+- `submission_vi_en_zh.json` / `.zip`.
 
-- Macro Precision, Recall và F2 cho document và chunk.
-- Recall ứng viên trước reranking; số tài liệu đúng mới do từng nhánh tìm được.
-- Kết quả theo ngôn ngữ, loại query và độ dài.
-- Thời gian xử lý, throughput, RAM/VRAM và dung lượng index.
-- Phiên bản corpus, parser, chunking, model và cấu hình.
+Theo [SUBMISSION.md](docs/SUBMISSION.md), m?i JSON ph?i c? ?? 1.200 query v? c?c tr??ng `id`, `relevant_docs`, `relevant_chunks`; m?c kh?ng c? k?t qu? v?n c? danh s?ch r?ng. Document ID ph?i thu?c corpus m?i; ki?u ID c?n tu?n theo ??c t?/scorer ch?nh th?c v? v? d? chu?i v? m? t? s? nguy?n trong t?i li?u hi?n ch?a nh?t qu?n.
 
-Phân tích lỗi theo tầng: thiếu tài liệu do thu thập; trích xuất sai; mất ngữ cảnh khi chunking; lexical mismatch; hiểu sai query; truy hồi bỏ sót; reranker hạ nhầm; chọn ngưỡng sai; hoặc xuất đoạn không đủ phủ. Chỉ thêm module khi có nhóm lỗi tương ứng và phép so sánh chứng minh lợi ích.
+`chunk_text` ph?i tr?ch t? t?i li?u g?c. Ki?m tra ID, schema, ngu?n chunk, query b? thi?u v? b?n ghi tr?ng tr??c khi ZIP. M?i ZIP ch?a duy nh?t m?t JSON ? th? m?c g?c.
 
-## 8. Cơ sở nghiên cứu và giới hạn suy luận
+## 10. Th? t? c?ng vi?c
 
-| Nguồn | Điều hỗ trợ | Giới hạn áp dụng |
-| --- | --- | --- |
-| [Dense X Retrieval](https://aclanthology.org/2024.emnlp-main.845/) | Đơn vị truy hồi ảnh hưởng chất lượng; nghiên cứu proposition | Chưa chứng minh cấu hình hierarchical/semantic chunking cụ thể cho ViBioMIR |
-| [Late Chunking](https://arxiv.org/abs/2409.04701) | Encode ngữ cảnh dài trước pooling từng chunk | Cần pipeline tương thích và đo chi phí ở corpus thực tế |
-| [Qwen3 Embedding](https://huggingface.co/Qwen/Qwen3-Embedding-8B) | Các cỡ model đa ngôn ngữ, hỗ trợ lựa chọn số chiều | Điểm benchmark tổng quát chưa quyết định chất lượng trên corpus này |
-| [Qwen3 Reranker](https://huggingface.co/Qwen/Qwen3-Reranker-4B) | Ứng viên reranker đa ngôn ngữ | Kết quả báo cáo phụ thuộc bộ candidate và benchmark của tác giả |
-| [BMRetriever](https://aclanthology.org/2024.emnlp-main.1241/) và [MedCPT](https://huggingface.co/ncbi/MedCPT-Article-Encoder) | Truy hồi chuyên biomedical tiếng Anh | Cần phần corpus phù hợp và lợi ích bổ sung so với baseline |
-| [BMQExpander](https://link.springer.com/article/10.1007/s10618-026-01220-z) | Query expansion dùng ontology có tiềm năng | Kết quả chính dùng GPT-4o và NDCG@10; có thử Llama 3.1 8B, nhưng chưa chứng minh tăng F2 cho ViBioMIR |
-| [UMLS](https://www.nlm.nih.gov/research/umls/knowledge_sources/metathesaurus/index.html) và [SapBERT](https://huggingface.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext) | Chuẩn hóa tên concept và synonym | Cần kiểm tra checkpoint, khả năng ngôn ngữ và lỗi linking |
-| [TREC BioGen 2025](https://trec.nist.gov/pubs/trec34/papers/uniud.biogen.pdf) | Ví dụ retrieval kết hợp reranking/NLI cho grounding | Nhiệm vụ khác; chưa chứng minh NLI có lợi cho câu hỏi tư vấn của ViBioMIR |
+1. Ph?n ng?n ng? v? ph?n c?ng crawl tr?n corpus m?i; ho?n thi?n checkpoint v? upload theo ng?n ng?.
+2. Crawl VI, kh?o s?t template, vi?t rule clean v? ki?m tra ch?t l??ng theo batch.
+3. Gi? metadata t?i thi?u, chunk VI, l?p BM25 v? th? Qwen 4B tr?n m?u r?i m? r?ng.
+4. Xu?t b?i n?p VI ho?n ch?nh; l?u c?u h?nh v? k?t qu? ??nh gi? baseline.
+5. Th? ICD-10 b?ng BM25 + embedding nh?; gi? khi c? l?i ?ch ho?c d?ng ?? ph?n t?ch corpus.
+6. X? l? EN qua c?ng pipeline, t?o VI+EN, ?o ??ng g?p v? ph?n t?ch l?i.
+7. X? l? ZH, t?o VI+EN+ZH, ?o ??ng g?p v? ph?n t?ch l?i.
+8. B? sung metadata v? c?c c?i ti?n retrieval d?a tr?n l?i ?? quan s?t; ch?n b?i n?p t?t nh?t ?? ki?m ch?ng.
 
-V1 chọn một baseline hybrid có thể đo và mở rộng: corpus sạch, chunk theo cấu trúc, BM25, một dense retriever đa ngôn ngữ, một reranker và cách xuất đoạn phù hợp scorer. Model bổ sung và ontology được đưa vào khi xác định được lỗi cần sửa, lợi ích trên tập đánh giá và chi phí triển khai tương xứng.
+C?c c? batch, dimension, chunk size, top-K, model nh? g?n tag v? th?i gian embedding ch?a ch?t. ?o tr?n m?u ??i di?n tr??c khi ch?y quy m? l?n. Theo [OVERVIEW.md](OVERVIEW.md), model ph?i ??p ?ng quy ??nh c?ng khai, t?i ?a 15B v? ph?t h?nh tr??c 01/08/2026; l?u revision v? b?ng ch?ng ng?y ph?t h?nh khi ch?n checkpoint.
 
-Tài liệu đầu vào: [OVERVIEW.md](OVERVIEW.md), [DATA.md](DATA.md), [EVALUATION.md](EVALUATION.md), [SUBMISSION.md](SUBMISSION.md) và [README của dataset](../dataset/README.md).
+**Ti?u ch? ti?n ??:** m?i ng?n ng? th?m v?o ph?i c? d? li?u c? th? truy nguy?n, index c? th? d?ng l?i, b?i n?p h?p l? v? b?o c?o ??ng g?p so v?i baseline tr??c ??.
