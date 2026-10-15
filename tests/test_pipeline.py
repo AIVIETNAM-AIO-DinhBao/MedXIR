@@ -22,11 +22,27 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import crawl
+import followup
+import prepare_recrawl
 import storage
 from content_parser import blocks_from, parse_page
 
 
 class PipelineChecks(unittest.TestCase):
+    def test_ncbi_access_screens_are_not_articles_or_ordinary_http_errors(self):
+        record = dict(url='https://pubmed.ncbi.nlm.nih.gov/34859388/',
+                      final_url='https://pubmed.ncbi.nlm.nih.gov/34859388/',
+                      http_status=203, content_type='text/html')
+        challenge = b'<script>const challengeId="sample"; function browserAcceptsCookies() {} async function submitSolve(nonce) {}</script>'
+        self.assertEqual(crawl.classify(record, challenge), 'access_challenge')
+        record.update(http_status=200, final_url='https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi')
+        blocked = b'<title>NCBI - WWW Error Blocked Diagnostic</title><h1>Access Denied</h1>'
+        self.assertEqual(crawl.classify(record, blocked), 'access_challenge')
+        article = b'<h1>Evaluation of an immune challenge</h1><p>Abstract: a study.</p>'
+        self.assertEqual(crawl.classify(record, article), 'html_response')
+        record['http_status'] = 404
+        self.assertEqual(crawl.classify(record, article), 'http_error')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -80,6 +96,82 @@ class PipelineChecks(unittest.TestCase):
         self.assertEqual(sum(map(len, partitions)), 2)
         for shard, ids in enumerate(partitions):
             self.assertTrue(all(doc_id % 3 == shard for doc_id in ids))
+
+        self.args.plan = self.root / 'fresh.jsonl'
+        self.args.fresh_plan = True
+        self.args.exclude_completed = []
+        crawl.prepare_plan(self.args)
+        self.assertEqual({json.loads(l)['doc_id'] for l in self.args.plan.read_text().splitlines()},
+                         {1, 4, 7, 10})
+
+    def test_complete_language_plans_preserve_deferred_ids_and_shards(self):
+        db = duckdb.connect()
+        db.execute('CREATE TABLE corpus(id BIGINT,url VARCHAR)')
+        db.executemany('INSERT INTO corpus VALUES (?,?)', [
+            (1, 'https://vi.example/a'), (8, 'https://zh.example/b'),
+            (11, 'https://pubmed.ncbi.nlm.nih.gov/123/')])
+        db.execute('COPY corpus TO ? (FORMAT PARQUET)', [str(self.args.corpus)])
+        db.close()
+        result = prepare_recrawl.build(self.args.corpus, self.root / 'new',
+            {'vi.example': 'vi', 'zh.example': 'zh', 'pubmed.ncbi.nlm.nih.gov': 'en'},
+            dict(corpus_sha256=storage.sha256(self.args.corpus),
+                 deferred_hosts={'pubmed.ncbi.nlm.nih.gov': 'parser_missing'}), 2)
+        self.assertEqual(result['total'], 3)
+        self.assertEqual(result['plans']['en']['deferred'], 1)
+        self.args.plan = self.root / 'new/en/plan.jsonl'
+        db = crawl.open_state(self.args, self.root)
+        pauses = json.loads(db.execute("SELECT value FROM metadata WHERE key='paused_hosts'").fetchone()[0])
+        self.assertIn('deferred:', pauses['pubmed.ncbi.nlm.nih.gov']['reason'])
+        self.assertEqual(db.execute('SELECT doc_id FROM jobs').fetchall(), [(11,)])
+        db.close()
+
+    def test_followup_covers_pending_errors_compact_and_review_then_clears_fixed_ids(self):
+        rows = [dict(doc_id=i, host='example.org', url=f'https://example.org/{i}')
+                for i in (1, 4, 7, 10, 13)]
+        db = self.state(rows)
+        for i, page, doc in [
+            (4, {'state': 'access_challenge'}, {'status': 'access_challenge'}),
+            (7, {'state': 'html_response'}, {'status': 'unknown_template'}),
+            (10, {'state': 'html_response'}, {'status': 'needs_review', 'has_text': True,
+                                            '_archived': 'batch', 'warnings': ['pagination_not_fetched']}),
+            (13, {'state': 'html_response'}, {'status': 'extracted_unreviewed', 'has_text': True})]:
+            db.execute('UPDATE jobs SET page=?,document=? WHERE doc_id=?',
+                       [json.dumps(page), json.dumps(doc), i])
+        db.commit()
+        report = followup.write_report(self.root)
+        self.assertEqual(report['outstanding'], 4)
+        self.assertEqual(report['total'], 5)
+        with gzip.open(self.root / 'followup/retry_fetch.jsonl.gz', 'rt') as f:
+            self.assertEqual([json.loads(l)['doc_id'] for l in f], [4])
+        with gzip.open(self.root / 'followup/reparse.jsonl.gz', 'rt') as f:
+            self.assertEqual([json.loads(l)['doc_id'] for l in f], [7])
+        db.execute('UPDATE jobs SET document=? WHERE doc_id=7',
+                   [json.dumps(dict(status='extracted_unreviewed', text='Fixed.'))])
+        db.commit()
+        self.assertEqual(followup.write_report(self.root)['outstanding'], 3)
+        db.close()
+
+    def test_short_image_documents_stay_in_review_without_losing_text(self):
+        body = '<p>Nội dung như sau: ' + 'dữ liệu ' * 25 + '</p><img src="a.jpg"><img src="b.jpg">'
+        doc = parse_page(dict(doc_id=1, host='baoquangtri.vn', url='https://baoquangtri.vn/a',
+                              state='html_response', content_type='text/html'),
+                         ('<h1>Example</h1><div class="td-post-content">' + body + '</div>').encode())
+        self.assertEqual(doc['status'], 'needs_review')
+        self.assertIn('image_content_not_transcribed', doc['warnings'])
+        self.assertIn('Nội dung như sau', doc['text'])
+
+    def test_max_new_bounds_concurrent_fetches_and_keeps_remaining_pending(self):
+        rows = [dict(doc_id=i, host=f'{i}.example.org', url=f'https://{i}.example.org/a')
+                for i in range(10)]
+        db = self.state(rows)
+        self.args.max_new = 3
+        async def fake_fetch(job, *args):
+            await asyncio.sleep(0)
+            return dict(job, state='html_response', http_status=200), dict(status='extracted_unreviewed')
+        with patch.object(crawl, 'crawl_one', side_effect=fake_fetch):
+            asyncio.run(crawl.run(self.args, db, self.root, time.monotonic(), {}))
+        self.assertEqual(db.execute('SELECT count(page) FROM jobs').fetchone()[0], 3)
+        db.close()
 
     def test_subdomains_share_budget_and_queue_wait_is_not_timeout(self):
         starts = []

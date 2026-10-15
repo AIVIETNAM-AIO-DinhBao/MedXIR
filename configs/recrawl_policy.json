@@ -1,0 +1,17 @@
+{
+  "corpus_sha256": "87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7",
+  "language_source": "Explicit host mapping reviewed against corpus audit; verify actual content language after fetch.",
+  "deferred_hosts": {
+    "article.iiyi.com": "access_blocked_in_20261015_pilot",
+    "ask.familydoctor.com.cn": "access_blocked_in_20261015_pilot",
+    "baidianfeng.familydoctor.com.cn": "access_blocked_in_20261015_pilot",
+    "bingli.iiyi.com": "access_blocked_in_20261015_pilot",
+    "laodong.vn": "access_blocked_in_20261015_pilot",
+    "pmc-ecm-healthblog.beta.pharmacity.io": "access_blocked_in_20261015_pilot",
+    "pubmed.ncbi.nlm.nih.gov": "pubmed_parser_not_implemented_and_ncbi_access_blocked",
+    "qy.familydoctor.com.cn": "access_blocked_in_20261015_pilot",
+    "www.120ask.com": "access_blocked_in_20261015_pilot",
+    "www.familydoctor.com.cn": "access_blocked_in_20261015_pilot",
+    "zysjonline.com": "access_blocked_in_20261015_pilot"
+  }
+}

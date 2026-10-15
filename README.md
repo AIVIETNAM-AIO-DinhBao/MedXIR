@@ -2,11 +2,11 @@
 
 Hệ thống truy hồi thông tin y sinh đa ngôn ngữ cho cuộc thi ViBioMIR: nhận câu hỏi tiếng Việt, tìm tài liệu và đoạn nội dung liên quan từ các nguồn tiếng Việt, tiếng Trung và tiếng Anh.
 
-**Hiện trạng:** parser `parser-v2.2` đã kiểm chứng trên 10.000 mẫu cũ, 1.000 URL mới và 40 URL Long Châu/Việt Đức; plan full có 4.381.984 URL, chia được cho hai máy và đã chuẩn bị đích Google Drive. Chưa khởi chạy full crawl. 12 host (761.900 URL) còn bị chặn/lỗi; xem [runbook hai máy](docs/CRAWL_RUNBOOK.md) và [PROGRESS.md](PROGRESS.md) trước khi chạy.
+**Hiện trạng (15/10/2026):** corpus hiện hành có 1.220.598 URL / 94 host; parser `parser-v2.3`. Đã tạo ba plan ngôn ngữ, chia hai shard, cấu hình Drive theo folder ID con và hàng đợi tải lỗi/parse lỗi/thiếu nội dung cập nhật định kỳ. Có 811.616 ID được mở crawl ban đầu; 408.982 ID hoãn do nguồn bị chặn hoặc PubMed chưa có parser. Lần crawl mới dùng [RECRAWL_RUNBOOK.md](docs/RECRAWL_RUNBOOK.md); các lệnh/corpus cũ ở phần dưới và runbook cũ là lịch sử.
 
 ## Dữ liệu và hướng giải quyết
 
-Dữ liệu cục bộ gồm **4.394.718 URL trên 97 host** và **1.200 truy vấn**. Corpus chỉ cung cấp `id/url`, không có sẵn nội dung tài liệu; truy vấn có `id/query`, chưa có nhãn liên quan cục bộ.
+Dữ liệu hiện hành là `dataset/links_corpus_vi_en_zh.parquet`, gồm **1.220.598 URL trên 94 host** và **1.200 truy vấn**. `dataset/links_corpus.parquet` trong checkout hiện tại là Git LFS pointer, chưa phải dữ liệu đọc được. Corpus chỉ cung cấp `id/url`, không có sẵn nội dung tài liệu; truy vấn có `id/query`, chưa có nhãn liên quan cục bộ.
 
 Pipeline dự kiến:
 

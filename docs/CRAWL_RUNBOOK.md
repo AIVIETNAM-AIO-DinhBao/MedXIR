@@ -1,5 +1,7 @@
 # Hướng dẫn chạy thu thập và parse dữ liệu
 
+> Hướng dẫn dưới đây là lịch sử cho corpus cũ. Lần crawl lại từ 15/10/2026 dùng [RECRAWL_RUNBOOK.md](RECRAWL_RUNBOOK.md).
+
 Runbook cho hai máy dùng chung Google Drive, cùng một plan và parser. Chạy từ thư mục gốc repo. Crawler tự parse mỗi trang ngay sau khi tải; raw được giữ để có thể sửa parser và parse lại.
 
 ## Phạm vi và nguyên tắc

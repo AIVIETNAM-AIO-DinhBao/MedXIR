@@ -1,10 +1,31 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 11/10/2026 (UTC+07:00).
+**Cập nhật:** 15/10/2026 (UTC+07:00).
 
-**Giai đoạn hiện tại:** parser v2.2 đã kiểm chứng trên 10.000 mẫu cũ, 1.000 URL mới và 40 URL của hai nguồn mở lại. Đã tạo full plan; sẵn sàng bắt đầu crawl có kiểm soát, chưa chạy toàn bộ corpus.
+**Giai đoạn hiện tại:** đã chuẩn bị lần crawl mới corpus 1.220.598 ID, parser v2.3, hai shard và ba đích Drive ngôn ngữ. Đã xác minh đợt đầu 300 VI + 300 ZH; shard 0 đã chạy dài từ 21:16 ngày 15/10/2026 (UTC+07:00), sau đó dừng nền theo yêu cầu người dùng ở 1.990 VI + 1.466 ZH; checkpoint và follow-up đã lưu. Lần tiếp theo chạy thủ công trên terminal. PubMed và các nguồn bị chặn được giữ trong hàng đợi hoãn.
 
 Tài liệu này ghi kết quả đã thu được. Các bước thiết kế chưa triển khai được đánh dấu riêng; hướng giải quyết tổng thể nằm trong [PROPOSED_SOLUTION.md](PROPOSED_SOLUTION.md).
+
+## Rà soát bổ sung — 15/10/2026
+
+Đã kiểm tra rclone trực tiếp: kho MedXIR chỉ còn ba thư mục rỗng `vi/`, `en/`, `zh/`; người dùng xác nhận teammate đã xóa dữ liệu để crawl lại. Các batch verified và kết quả crawl dưới đây là lịch sử, không phản ánh dữ liệu còn trên Drive. Local full shard 0 đã xử lý 321.391 URL ngày 12/10, nên mô tả “chưa chạy full” ở phần lịch sử đã lỗi thời.
+
+Corpus hiện hành có 1.220.598 ID / 94 host, hash khớp Hugging Face, khác số 1.194.469 trong thông báo. Pilot mới: 266/275 URL đã xử lý, 240 có text, 9 pending do pause; chưa đủ căn cứ kết luận mọi nội dung đã đầy đủ. Đã sửa nhận diện challenge/blocked NCBI trong crawler, 8 test offline đạt. Chưa triển khai parser PubMed, chưa crawl full lại hoặc upload.
+
+Báo cáo, danh sách host, giới hạn kiểm thử và đề xuất triển khai: [AUDIT_2026-10-15.md](docs/AUDIT_2026-10-15.md).
+
+## Triển khai crawl lại và hàng đợi sửa lỗi — 15/10/2026
+
+- `prepare_recrawl.py` tạo đủ ba plan, không loại ID theo lịch sử; hợp bằng corpus, ID/URL duy nhất, hai shard modulo 2 không trùng. Mapping host/ngôn ngữ và policy được lưu trong `configs/`.
+- Tổng VI/EN/ZH: 740.598 / 240.000 / 240.000. Ban đầu mở 703.983 VI + 107.633 ZH = **811.616 ID**; **408.982 ID hoãn**, vẫn nằm trong plan và follow-up.
+- Đã ghim ba storage config vào folder ID con hiện có, chuẩn bị cloud cho cả hai shard và chia sẻ manifest/plan/config trong `MedXIR/coordination/recrawl_20261015/`.
+- `followup.py` xuất snapshot SQLite nhất quán: CSV tất cả ID cần xử lý, plan retry tải và plan ID reparse; có lý do, action, raw locator, checksum, thống kê theo host. Cập nhật mỗi 300 giây và khi kết thúc, upload rồi đọc lại xác minh. Có báo cáo ban đầu cho cả shard 1 dù chưa crawl.
+- Parser v2.3 bổ sung review bài text ngắn và bài ít text/nhiều ảnh. Reparse chọn lọc ba ID 64406/89705/89714 từ raw cũ đã giữ nguyên text và chuyển đúng sang needs_review.
+- `--reparse-plan` chọn chính xác ID/URL để reparse, không tải lại website; `--max-new` giới hạn đợt kiểm chứng; runner chia tổng 16 worker thành 8 VI + 8 ZH/máy.
+- 12 kiểm tra offline đạt; đã thử thực tế prepare, upload/checksum và reparse chọn lọc. Đợt đầu: 600 URL đã xử lý, 593 có text (447 extracted_unreviewed, 146 needs_review), 7 không có text. Bốn batch đã upload/đọc lại khớp SHA-256. Đã khôi phục raw từ một batch mỗi ngôn ngữ VI/ZH, kiểm hash nguồn và parse lại khớp text đã upload; bằng chứng ở `artifacts/recrawl_20261015/verification.json`.
+- Shard 0 chạy dài với 8 worker VI + 8 worker ZH, 1/nhóm nguồn, delay hiệu dụng 4 giây/máy; batch 2.000 kết quả hoặc 128 MiB raw gzip, prune chỉ sau xác minh. Shard 1 đã khởi tạo báo cáo nhưng chưa crawl, dành cho teammate. PID/log hiện hành ở `artifacts/recrawl_20261015/active_run.json` và `processes-shard-0.json`.
+
+Lệnh hiện hành và chi tiết xử lý lỗi: [RECRAWL_RUNBOOK.md](docs/RECRAWL_RUNBOOK.md). Checkpoint SQLite vẫn giữ local; giữ nguyên plan/shard/config khi resume. Độ đầy đủ nội dung và retrieval chưa được benchmark; extracted_unreviewed không đồng nghĩa đã duyệt sạch.
 
 ## 1. Đọc đề bài và khảo sát dữ liệu — đã thực hiện
 

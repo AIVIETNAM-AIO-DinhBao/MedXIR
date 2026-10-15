@@ -15,7 +15,7 @@ from html import unescape
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-VERSION = 'parser-v2.2'
+VERSION = 'parser-v2.3'
 
 # Public CMS renderer: dSecurity.b7 in dcore-2.2.0.d7.204.js and
 # dcms.decode in cmsfcore.dg72.js (baophutho.vn / baothanhhoa.vn).
@@ -691,8 +691,12 @@ def parse_page(record, raw):
         warnings.append('placeholder_qa')
     if not result['text']:
         warnings.append('media_only' if result['resources'] else 'empty_extraction')
-    if result['resources'] and sum(len(b['text']) for b in result['blocks']) < 100 and any(r['kind'] == 'img' for r in result['resources']):
+    text_length = sum(len(b['text']) for b in result['blocks'])
+    image_count = sum(r['kind'] == 'img' for r in result['resources'])
+    if image_count and (text_length < 100 or image_count >= 2 and text_length < 500):
         warnings.append('image_content_not_transcribed')
+    if result['text'] and text_length < 200:
+        warnings.append('short_content_requires_review')
     if any(r['kind'] == 'pdf' for r in result['resources']):
         warnings.append('pdf_not_parsed')
     if any(r['kind'] in {'audio', 'video'} for r in result['resources']):

@@ -26,6 +26,7 @@ import httpx
 
 from content_parser import VERSION, parse_page, write_review
 from storage import Storage
+from followup import write_report
 
 
 def utc_now():
@@ -59,7 +60,8 @@ def prepare_plan(args):
     pilot = [json.loads(line) for line in args.pilot.read_text().splitlines() if line.strip()]
     hosts = sorted({r['host'] for r in pilot if r['state'] == 'html_response'} | set(args.include_host))
     # Deferred pilot entries were never fetched; they still belong in a full plan.
-    excluded_ids = sorted({int(r['doc_id']) for r in pilot if r['state'] != 'skipped_host'})
+    excluded_ids = [] if getattr(args, 'fresh_plan', False) else sorted({
+        int(r['doc_id']) for r in pilot if r['state'] != 'skipped_host'})
     db = duckdb.connect()
     db.execute('CREATE TEMP TABLE excluded_docs(doc_id BIGINT PRIMARY KEY)')
     if excluded_ids:
@@ -156,22 +158,41 @@ def open_state(args, root):
         delay=args.delay, effective_delay=args.delay * args.shard_count,
         timeout=args.timeout, retries=args.retries))])
     if not db.execute("SELECT 1 FROM metadata WHERE key='plan_loaded'").fetchone():
+        deferred = {}
+        languages = set()
         with args.plan.open(encoding='utf-8') as file:
             batch = []
             for line in file:
                 row = json.loads(line)
                 if row['doc_id'] % args.shard_count == args.shard_id:
                     batch.append((row['doc_id'], row['url'], row['host']))
+                    if row.get('deferred_reason'):
+                        deferred[row['host']] = dict(reason='deferred:' + row['deferred_reason'])
+                    if row.get('language'):
+                        languages.add(row['language'])
                 if len(batch) >= 1000:
                     db.executemany('INSERT OR IGNORE INTO jobs(doc_id,url,host) VALUES (?,?,?)', batch)
                     batch.clear()
             db.executemany('INSERT OR IGNORE INTO jobs(doc_id,url,host) VALUES (?,?,?)', batch)
         db.execute("INSERT INTO metadata VALUES ('plan_loaded','1')")
+        if deferred:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts',?)", [json.dumps(deferred)])
+        if len(languages) == 1:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('language',?)", [languages.pop()])
     db.commit()
     return db
 
 
 def classify(record, raw):
+    sample = raw[:8000].decode('utf-8', errors='ignore').lower()
+    # NCBI serves its access screens with both 200 and 203. Detect these
+    # before HTTP classification so the shared source pause can take effect.
+    host = urlsplit(record.get('final_url') or record['url']).hostname or ''
+    if (host == 'ncbi.nlm.nih.gov' or host.endswith('.ncbi.nlm.nih.gov')) and (
+            '<title>ncbi - www error blocked diagnostic</title>' in sample
+            or ('challengeid' in sample and 'submitsolve' in sample
+                and 'browseracceptscookies' in sample)):
+        return 'access_challenge'
     if record['http_status'] != 200:
         return 'http_error'
     if not raw:
@@ -179,7 +200,6 @@ def classify(record, raw):
     mime = record['content_type']
     if mime and 'html' not in mime:
         return 'non_html'
-    sample = raw[:8000].decode('utf-8', errors='ignore').lower()
     if ('denied by http_custom' in sample or 'verify you are human' in sample
             or 'document.cookie' in sample and 'location.reload' in sample
             or 'captcha' in sample and len(raw) < 10000):
@@ -192,7 +212,7 @@ def classify(record, raw):
 
 def rate_group(host):
     """Observed related subdomains share one request budget."""
-    for domain in ('39.net', 'familydoctor.com.cn', 'iiyi.com'):
+    for domain in ('39.net', 'familydoctor.com.cn', 'iiyi.com', 'ncbi.nlm.nih.gov'):
         if host == domain or host.endswith('.' + domain):
             return domain
     return host
@@ -407,6 +427,7 @@ async def run(args, db, root, started, paused, storage=None):
             last_id = rows[-1][0]
 
     processed = 0
+    scheduled = 0
     remaining_workers = len(hosts) * args.host_workers
     consecutive_errors = Counter()
     parser_streak = Counter()
@@ -429,10 +450,13 @@ async def run(args, db, root, started, paused, storage=None):
         downloader.paused_groups.update(blocked_groups)
 
         async def crawl_host(host, jobs):
-            nonlocal processed
+            nonlocal processed, scheduled
             for job in jobs:
                 if host in paused:
                     break
+                if getattr(args, 'max_new', 0) and scheduled >= args.max_new:
+                    break
+                scheduled += 1
                 try:
                     page, document = await crawl_one(job, downloader, root, args)
                 except HostPaused:
@@ -445,7 +469,7 @@ async def run(args, db, root, started, paused, storage=None):
                 db.commit()
                 processed += 1
                 counts[document['status']] += 1
-                bad_parse = (document['status'] in {'unknown_template', 'parser_error', 'encoded_content'}
+                bad_parse = (document['status'] in {'unknown_template', 'parser_error', 'encoded_content', 'empty_content'}
                              or 'block_text_mismatch' in document.get('warnings', []))
                 parser_streak[host] = parser_streak[host] + 1 if bad_parse else 0
                 recent_parser_errors[host].append(bad_parse)
@@ -486,13 +510,25 @@ async def run(args, db, root, started, paused, storage=None):
 
         async def upload_batches():
             # Own SQLite connections in the storage thread; HTTP requests keep progressing.
+            last_report = time.monotonic()
             while remaining_workers:
                 await asyncio.to_thread(storage.flush)
+                if time.monotonic() - last_report >= getattr(args, 'followup_every', 300):
+                    await asyncio.to_thread(write_report, root, storage)
+                    last_report = time.monotonic()
                 if storage.cache_bytes() > args.cache_limit_gb * 1024**3:
                     raise ValueError('Raw/batch cache limit reached. Resume after uploading '
                                      'with --prune-local, or increase --cache-limit-gb.')
                 await asyncio.sleep(2)
             await asyncio.to_thread(storage.flush, True)
+
+        async def local_reports():
+            last_report = time.monotonic()
+            while remaining_workers:
+                if time.monotonic() - last_report >= getattr(args, 'followup_every', 300):
+                    await asyncio.to_thread(write_report, root)
+                    last_report = time.monotonic()
+                await asyncio.sleep(1)
 
         # Structured concurrency cancels outstanding requests if any task fails.
         async with asyncio.TaskGroup() as group:
@@ -502,6 +538,8 @@ async def run(args, db, root, started, paused, storage=None):
                     group.create_task(worker(host, jobs))
             if storage:
                 group.create_task(upload_batches())
+            else:
+                group.create_task(local_reports())
 
 
 def show_status(root):
@@ -543,6 +581,11 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('artifacts/crawl'))
     parser.add_argument('--limit', type=int, default=10000, help='Plan size; 0 = all eligible URLs')
     parser.add_argument('--seed', type=int, default=20261010)
+    parser.add_argument('--fresh-plan', action='store_true', help='Do not exclude historical pilot IDs when creating a NEW plan')
+    parser.add_argument('--max-new', type=int, default=0, help='Stop after scheduling this many URLs; 0 = no cap')
+    parser.add_argument('--followup-every', type=float, default=300, help='Seconds between local/cloud repair queue snapshots')
+    parser.add_argument('--followup-only', action='store_true', help='Initialize checkpoint and publish repair queues without fetching')
+    parser.add_argument('--reparse-plan', type=Path, help='With --reparse, restrict to IDs/URLs in this JSONL[.gz] plan')
     parser.add_argument('--exclude-completed', type=Path, action='append', default=[],
                         help='Exclude completed IDs in this state.sqlite when creating a plan; repeatable')
     parser.add_argument('--all-hosts', action='store_true', help='Include hosts without successful pilot HTML in a NEW plan')
@@ -575,15 +618,20 @@ def main():
             or args.workers < 1 or args.delay < 0 or args.timeout <= 0 or args.retries < 0
             or args.max_bytes < 1 or args.review_limit < 0 or args.progress_every < 1
             or args.host_workers < 1 or args.batch_docs < 1 or args.batch_mb < 1
-            or args.cache_limit_gb <= 0 or args.parse_workers < 1):
+            or args.cache_limit_gb <= 0 or args.parse_workers < 1 or args.max_new < 0
+            or args.followup_every <= 0):
         parser.error('Invalid limits, shard, or concurrency configuration')
     if args.prune_local and not args.storage_config:
         parser.error('--prune-local requires --storage-config')
     if args.force_reparse and not args.reparse:
         parser.error('--force-reparse requires --reparse')
-    if args.retry_paused and any((args.status, args.prepare_only, args.export_only, args.reparse)):
+    if args.reparse_plan and not args.reparse:
+        parser.error('--reparse-plan requires --reparse')
+    if args.fresh_plan and args.exclude_completed:
+        parser.error('--fresh-plan cannot exclude historical checkpoints')
+    if args.retry_paused and any((args.status, args.prepare_only, args.export_only, args.reparse, args.followup_only)):
         parser.error('--retry-paused is only for crawling pending URLs')
-    if sum((args.status, args.prepare_only, args.export_only, args.reparse)) > 1:
+    if sum((args.status, args.prepare_only, args.export_only, args.reparse, args.followup_only)) > 1:
         parser.error('Choose one mode: --status, --prepare-only, --export-only, or --reparse')
     root = args.output / f'shard-{args.shard_id:03d}-of-{args.shard_count:03d}'
     if args.status:
@@ -632,6 +680,18 @@ def main():
                 archive_column = 'archive' if 'archive' in columns else 'NULL'
                 condition = "page IS NOT NULL"
                 parameters = []
+                if args.reparse_plan:
+                    db.execute('CREATE TEMP TABLE repair_ids(doc_id INTEGER PRIMARY KEY)')
+                    opener = gzip.open if args.reparse_plan.suffix == '.gz' else open
+                    with opener(args.reparse_plan, 'rt', encoding='utf-8') as repair_file:
+                        for line in repair_file:
+                            item = json.loads(line)
+                            row = db.execute('SELECT url FROM jobs WHERE doc_id=?', [item['doc_id']]).fetchone()
+                            if row and row[0] != item['url']:
+                                raise ValueError(f'Reparse plan URL mismatch: {item["doc_id"]}')
+                            if row:
+                                db.execute('INSERT OR IGNORE INTO repair_ids VALUES (?)', [item['doc_id']])
+                    condition += ' AND doc_id IN (SELECT doc_id FROM repair_ids)'
                 if not args.force_reparse:
                     condition += " AND coalesce(json_extract(document,'$.parser_version'),'') != ?"
                     parameters = [VERSION]
@@ -671,7 +731,7 @@ def main():
                                 storage.flush()
                 if storage:
                     storage.flush(force=True)
-            elif not args.export_only:
+            elif not args.export_only and not args.followup_only:
                 asyncio.run(run(args, db, root, started, paused, storage))
         except KeyboardInterrupt:
             print('Interrupted; saved jobs will be skipped on resume.', flush=True)
@@ -679,11 +739,16 @@ def main():
             print(f'Crawler stopped: {error.exceptions}. Resume keeps completed jobs.', flush=True)
             raise SystemExit(1)
         finally:
-            export_results(db, root, started, paused, args.review_limit, storage,
-                           export_files=not storage or args.export_only)
-            pending = db.execute('SELECT count(*) FROM jobs WHERE page IS NULL').fetchone()[0]
-            db.close()
-        if pending and not (args.reparse or args.export_only):
+            try:
+                export_results(db, root, started, paused, args.review_limit, storage,
+                               export_files=not storage or args.export_only)
+                report = write_report(root, storage)
+                print(f'Follow-up queue: {report["outstanding"]:,}/{report["total"]:,} IDs; '
+                      f'{root / "followup" / "documents.csv.gz"}', flush=True)
+                pending = db.execute('SELECT count(*) FROM jobs WHERE page IS NULL').fetchone()[0]
+            finally:
+                db.close()
+        if pending and not (args.reparse or args.export_only or args.followup_only):
             print(f'{pending:,} URLs still pending. Inspect --status; resume after resolving paused hosts.', flush=True)
             raise SystemExit(2)
 
