@@ -15,7 +15,7 @@ from html import unescape
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-VERSION = 'parser-v2.3'
+VERSION = 'parser-v2.4'
 
 # Public CMS renderer: dSecurity.b7 in dcore-2.2.0.d7.204.js and
 # dcms.decode in cmsfcore.dg72.js (baophutho.vn / baothanhhoa.vn).
@@ -140,7 +140,7 @@ RULES.update({
     'jb39.com': ['.post-jibing'],
     'youmed.vn': ['section.article-content article:not([class]) > div.prose'],
     'vov2.vov.vn': ['.article-body', '.article__body'],
-    'www.msdmanuals.cn': ['[class*="TopicMainContent_content"]', '[class*="Chapter_content"]'],
+    'www.msdmanuals.cn': ['[class*="TopicMainContent_content"]', '[class*="Chapter_content"]', '[class*="Section_content"]'],
     'suckhoeviet.org.vn': ['.__MASTERCMS_CONTENT'],
     'tamanhhospital.vn': ['.post_info.box_detail_post:has(p)'],
     'www.qdnd.vn': ['.post-content'],
@@ -161,6 +161,11 @@ RULES.update({
 RULES['nhandan.vn'].append('.Theme-Layer-BodyText--inner')
 RULES['care.39.net'].append('.art > .content')
 RULES['man.39.net'].append('body > p')
+# Older 39.net article templates, shared across channel subdomains.
+for host in [h for h in RULES if h.endswith('.39.net')]:
+    RULES[host] += [s for s in ('.art > .content', '.artbox > .article', 'body > .wrap:not(.tools):has(> p)')
+                    if s not in RULES[host]]
+RULES['www.cnkang.com'].append('td#iContent')
 RULES['suckhoedoisong.vn'].append('.detail-container [data-role="video-autoplay"]')
 RULES['dantri.com.vn'].append('main > .video-highlight, main > .video-grid')
 
@@ -350,6 +355,61 @@ def blocks_from(root, role):
     return blocks
 
 
+WIKI_REFERENCE_HEADINGS = {'参考', '参考文献', '参考来源', '参考资料', '注释', '引用'}
+# Site-wide templates appended to a-hospital/zhongyibaodian entries (sample of 1,353 pages).
+# Link density alone is not enough: clinical lists such as 临床意义 link every disease name.
+WIKI_NAVIGATION_HEADINGS = re.compile(
+    r'参看|参见|另见|相关页面|相关条目|更多医学百科条目|站外链接|外部链接|外部连结|人体穴位图|乙肝科普知识'
+    r'|附：中药材大全|按功效分类的常用方剂|.*专题|健康问答网关于.+的相关提问|.*按.+查询.*|.+分区域查询')
+
+def mostly_links(nodes):
+    total = sum(len(re.sub(r'\s+', '', text(n))) for n in nodes)
+    linked = sum(len(re.sub(r'\s+', '', text(a))) for n in nodes
+                 for a in ([n] if n.name == 'a' else n.select('a')))
+    return total > 0 and linked >= total / 2
+
+
+def trim_wiki_tail(root, remove):
+    """Drop trailing MediaWiki navigation sections and empty headings.
+
+    Sections are scanned from the end. Reference and media-only sections are kept
+    and scanning continues; the first other section stops trimming. Returns False
+    when the remaining tail still needs review: its last section (or last block,
+    without headings) is mostly links under an unrecognized heading. Returns
+    'listing' without removing anything when every section is navigation, i.e.
+    the page itself is a lookup index."""
+    children = root.find_all(recursive=False)
+    sections, current = [], None
+    for child in children:
+        if re.fullmatch(r'h[2-6]', child.name):
+            current = [child]
+            sections.append(current)
+        elif current is not None:
+            current.append(child)
+    if not sections:
+        blocks = [n for n in children if text(n)]
+        return not (blocks and mostly_links(blocks[-1:]))
+    doomed, verdict = [], True
+    for heading, *body in reversed(sections):
+        title = text(heading)
+        has_text = any(text(n) for n in body)
+        media = any(n.name in {'img', 'table', 'figure', 'iframe', 'video', 'audio'}
+                    or n.select_one('img, table, figure, iframe, video, audio') for n in body)
+        if WIKI_NAVIGATION_HEADINGS.fullmatch(title) or not has_text and not media:
+            doomed += [heading, *body]
+            continue
+        if title in WIKI_REFERENCE_HEADINGS or not has_text:
+            continue
+        verdict = not mostly_links(body)
+        break
+    removed = {id(node) for node in doomed}
+    if not any(text(n) for n in children if id(n) not in removed):
+        return 'listing'
+    for node in doomed:
+        remove(node, 'wiki_tail_navigation')
+    return verdict
+
+
 def clean_region(root, host, role, result):
     def remove(node, reason):
         value = text(node)
@@ -407,6 +467,12 @@ def clean_region(root, host, role, result):
             if sibling and sibling.name in {'ul', 'ol', 'div', 'table'} and sibling.select_one('a[href]'):
                 remove(sibling, 'wiki_related_navigation')
                 remove(heading, 'wiki_related_navigation_label')
+        tail = trim_wiki_tail(root, remove)
+        if tail == 'listing':
+            result['page_type'] = 'listing'
+            result['warnings'].append('listing_not_single_article')
+        elif not tail:
+            result['warnings'].append('wiki_tail_requires_review')
     if host == 'qihuangzhishu.com':
         for node in list(root.select('.cbd > p')):
             if text(node).startswith(('1000余本中医古籍', '下载《', '下载所有中医书籍')):
@@ -635,7 +701,7 @@ def parse_page(record, raw):
     if host == 'www.cnkang.com' and result['selectors'] == ['.zh05b']:
         result['page_type'] = 'listing'
         warnings.append('listing_description_only')
-    if host == 'www.msdmanuals.cn' and 'Chapter_content' in result['selectors'][0]:
+    if host == 'www.msdmanuals.cn' and re.search(r'Chapter_content|Section_content', result['selectors'][0]):
         result['page_type'] = 'listing'
         warnings.append('chapter_index')
     for root, role in regions:
@@ -695,7 +761,10 @@ def parse_page(record, raw):
     image_count = sum(r['kind'] == 'img' for r in result['resources'])
     if image_count and (text_length < 100 or image_count >= 2 and text_length < 500):
         warnings.append('image_content_not_transcribed')
-    if result['text'] and text_length < 200:
+    # A QA page with both a question and an answer is complete even when short.
+    complete_qa = (result['page_type'] == 'qa' and any(b['role'] == 'question' for b in result['blocks'])
+                   and any(answer['text'] for answer in result['answers']))
+    if result['text'] and text_length < 200 and not complete_qa:
         warnings.append('short_content_requires_review')
     if any(r['kind'] == 'pdf' for r in result['resources']):
         warnings.append('pdf_not_parsed')
@@ -703,8 +772,6 @@ def parse_page(record, raw):
         warnings.append('media_transcript_not_verified')
     if any(r['kind'] in {'iframe', 'embedded'} for r in result['resources']):
         warnings.append('embedded_content_not_parsed')
-    if host in {'www.a-hospital.com', 'zhongyibaodian.net'}:
-        warnings.append('wiki_tail_requires_review')
     result['warnings'] = list(dict.fromkeys(warnings))
     result['status'] = 'needs_review' if warnings else 'extracted_unreviewed'
     return result

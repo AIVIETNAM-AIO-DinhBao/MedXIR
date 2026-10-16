@@ -232,4 +232,14 @@ Sau reparse toàn bộ raw bằng `parser-v2.1`: **9.775 bản ghi có text**, 0
 - Đã parse lại toàn bộ pilot bằng v2.2: 1.578/1.820 có text, không unknown/encoded/mismatch. Các bảng snapshot phía trên là kết quả lịch sử.
 - Đã quan sát nội dung ở 85/97 host. 12 host còn bị chặn/lỗi truy cập, chiếm 761.900 URL; chưa thể suy ra template sạch cho các nguồn này. Reachable host vẫn có thể thay template hoặc bị chặn về sau.
 
+## parser-v2.4 sau crawl ZH shard 0 — 16/10/2026
+
+Đối chiếu trên raw thật của ZH shard 0 (1.353 trang wiki và 20 QA trong một batch, cùng 8 trang `unknown_template`):
+
+- **Đuôi wiki a-hospital/zhongyibaodian:** bỏ cảnh báo `wiki_tail_requires_review` vô điều kiện. Quét mục từ cuối trang và bỏ mục có tiêu đề thuộc template điều hướng của site (`参看`, `参见`, `相关页面`, `更多医学百科条目`, `…专题`, `健康问答网关于…的相关提问`, `…按…查询…`, `附：中药材大全`, `站外/外部链接`...) hoặc mục rỗng. Giữ mục tham khảo và mục chỉ có media rồi quét tiếp; dừng ở mục nội dung đầu tiên. Phần bỏ ghi `removed` với lý do `wiki_tail_navigation`. Không dùng riêng mật độ link: `临床意义` và danh sách thuốc liên kết mọi tên bệnh/thuốc (~50% link). Cảnh báo vẫn giữ khi mục cuối (hoặc khối cuối nếu không có heading) dày link dưới tiêu đề lạ. Trang tra cứu chỉ gồm mục điều hướng (`…疾病查询`, `眼科疾病`) không bị cắt mà ghi `listing` + `listing_not_single_article`.
+- **QA ngắn:** `short_content_requires_review` không áp dụng cho trang QA có câu hỏi và ít nhất một câu trả lời có text. ask.39.net: 6.272/6.277 trang bị cảnh báo có đủ cả hai; QA thường ngắn, không phải parser cắt mất.
+- **Template cũ:** 39.net thêm fallback `.art > .content`, `.artbox > .article`, `body > .wrap:not(.tools):has(> p)`; cnkang thêm `td#iContent`. msdmanuals `[class*="Section_content"]` là mục lục chủ đề, ghi `listing` + `chapter_index`.
+
+Reparse chọn lọc 11.636 ID của ZH shard 0 (wiki, QA ngắn, 8 unknown): needs_review 15.253 → 4.849, unknown_template 8 → 0, có text 53.597 → 53.605. Hàng đợi còn lại lớn nhất: pmphai `paywalled_sections` 1.317 (nội dung trả phí, parser không lấy thêm được), cnkang `short_content` 1.088, a-hospital/zhongyibaodian `short_content` ~700 (mục từ ngắn thật), `wiki_tail_requires_review` 388.
+
 Danh mục này là các cấu trúc đã thấy trong mẫu, không bảo đảm mọi URL khớp. Gate crawler tạm dừng nguồn nếu phát sinh nhiều unknown/error/encoded/mismatch; raw và phần loại bỏ giữ lại để bổ sung parser. Chưa tải tiếp trang phân trang và chưa chuyển toàn bộ media/PDF thành text. Xem [tiến trình](../PROGRESS.md#12-parser-v22-và-khả-năng-chạy-full--11102026).

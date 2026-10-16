@@ -17,6 +17,8 @@ Không loại bỏ ID hoãn: chúng có trong plan, checkpoint và báo cáo fol
 
 `parser-v2.3` thêm cảnh báo text quá ngắn và bài nhiều ảnh nhưng ít text. Trang có text/cảnh báo vẫn giữ nguyên raw, không coi là đã duyệt đủ nội dung.
 
+`parser-v2.4` (16/10/2026) cắt đuôi điều hướng wiki, không cảnh báo QA ngắn đã đủ câu hỏi/trả lời, thêm template cũ 39.net/cnkang và mục lục msdmanuals; xem [HOST_TEMPLATES.md](HOST_TEMPLATES.md#parser-v24-sau-crawl-zh-shard-0--16102026). Batch crawl bằng v2.3 vẫn hợp lệ; reparse chọn lọc các ID bị ảnh hưởng (không cần reparse toàn bộ VI vì thay đổi chỉ chạm host ZH).
+
 ## Chuẩn bị một lần trên máy điều phối
 
 ```bash

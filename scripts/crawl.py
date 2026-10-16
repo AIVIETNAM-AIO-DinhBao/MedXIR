@@ -739,15 +739,22 @@ def main():
                 if not args.force_reparse:
                     condition += " AND coalesce(json_extract(document,'$.parser_version'),'') != ?"
                     parameters = [VERSION]
-                total = db.execute(f'SELECT count(*) FROM jobs WHERE {condition}', parameters).fetchone()[0]
+                # Read IDs up front: an open SELECT keeps a WAL read snapshot, and the
+                # storage connection's batch writes would then make our UPDATE fail.
+                ids = [row[0] for row in db.execute(
+                    f'SELECT doc_id FROM jobs WHERE {condition} ORDER BY doc_id', parameters)]
+                total = len(ids)
                 print(f'Reparse {total:,} saved documents with {VERSION}; no source HTTP requests.', flush=True)
-                rows = db.execute(f'SELECT doc_id,page,{archive_column} FROM jobs WHERE {condition} ORDER BY doc_id', parameters)
                 processed = 0
                 with ExitStack() as stack:
                     pool = stack.enter_context(ProcessPoolExecutor(args.parse_workers,
                         mp_context=get_context('spawn'))) if args.parse_workers > 1 else None
                     # Bound queued raw/results to a small batch, not the whole corpus.
-                    while batch := rows.fetchmany(args.parse_workers * 2):
+                    step = args.parse_workers * 2
+                    for start in range(0, total, step):
+                        chunk = ids[start:start + step]
+                        batch = db.execute(f'SELECT doc_id,page,{archive_column} FROM jobs WHERE doc_id IN '
+                                           f'({",".join("?" * len(chunk))}) ORDER BY doc_id', chunk).fetchall()
                         tasks = []
                         for doc_id, page_json, archive_id in batch:
                             page = json.loads(page_json)

@@ -162,6 +162,67 @@ class PipelineChecks(unittest.TestCase):
         self.assertIn('image_content_not_transcribed', doc['warnings'])
         self.assertIn('Nội dung như sau', doc['text'])
 
+    def test_wiki_tail_drops_navigation_but_keeps_linked_clinical_lists(self):
+        def page(tail):
+            html = ('<h1 id="firstHeading">Entry</h1><div id="bodyContent"><p>' + '正文内容。' * 50 + '</p>'
+                    '<h2>临床意义</h2><p>增加：<a href="/w/a">心肌梗塞</a>，<a href="/w/b">高血压</a>。</p>' + tail +
+                    '<h2>参考文献</h2><p>[1] 指南.</p><h2>参看</h2><ul><li><a href="/w/c">疫苗</a></li></ul>'
+                    '<h2>怎样看化验单专题</h2><p>关于医学化验单：</p><ul><li><a href="/w/d">化验</a></li></ul>'
+                    '<h2>健康问答网关于疫苗的相关提问</h2><table><tr><td><a href="/q">问题?</a></td></tr></table>'
+                    '<h2>更多医学百科条目</h2><div id="catlinks"><a href="/c">分类</a></div></div>')
+            return parse_page(dict(doc_id=1, host='www.a-hospital.com', url='https://www.a-hospital.com/w/x',
+                                   state='html_response', content_type='text/html'), html.encode())
+        doc = page('')
+        for value in ('心肌梗塞', '高血压', '[1] 指南.'):
+            self.assertIn(value, doc['text'])
+        for value in ('疫苗', '化验', '问题?', '更多医学百科条目', '参看'):
+            self.assertNotIn(value, doc['text'])
+        self.assertTrue(any(r['reason'] == 'wiki_tail_navigation' for r in doc['removed']))
+        # An unrecognized link-dense last section is kept but stays in review.
+        self.assertIn('wiki_tail_requires_review', doc['warnings'])
+        doc = page('<h2>治疗</h2><p>' + '应及时就医并规范治疗。' * 3 + '</p>')
+        self.assertEqual(doc['warnings'], [])
+        self.assertEqual(doc['status'], 'extracted_unreviewed')
+        # A lookup page made only of navigation sections keeps its text as a listing.
+        html = ('<h1 id="firstHeading">头部疾病查询</h1><div id="bodyContent"><h2>按疾病发生部位查询疾病</h2>'
+                '<ul><li><a href="/w/a">头痛</a></li><li><a href="/w/b">偏头痛</a></li></ul></div>')
+        doc = parse_page(dict(doc_id=2, host='www.a-hospital.com', url='https://www.a-hospital.com/w/y',
+                              state='html_response', content_type='text/html'), html.encode())
+        self.assertIn('偏头痛', doc['text'])
+        self.assertEqual(doc['page_type'], 'listing')
+        self.assertIn('listing_not_single_article', doc['warnings'])
+
+    def test_short_qa_is_complete_only_with_question_and_answer(self):
+        def page(answer):
+            html = ('<div class="ask_tit">斑秃需要戒酒吗？</div><div class="ask_hid"><p class="txt_ms">斑秃需要戒酒吗？</p></div>'
+                    '<div class="selected"><div class="sele_all"><div class="sele_txt">' + answer + '</div></div></div>')
+            return parse_page(dict(doc_id=1, host='ask.39.net', url='https://ask.39.net/question/1.html',
+                                   state='html_response', content_type='text/html'), html.encode())
+        doc = page('喝酒会加重斑秃，建议戒酒。')
+        self.assertNotIn('short_content_requires_review', doc['warnings'])
+        self.assertEqual(doc['status'], 'extracted_unreviewed')
+        # An empty answer box is not an answer.
+        doc = page('')
+        self.assertIn('short_content_requires_review', doc['warnings'])
+        self.assertEqual(doc['status'], 'needs_review')
+
+    def test_legacy_39_and_cnkang_templates_and_msd_topic_index(self):
+        cases = [('care.39.net', '<div class="wrap"><p>' + '偏方正文。' * 10 + '</p></div><div class="wrap tools">分享</div>'),
+                 ('fk.39.net', '<div class="artbox"><div class="article"><p>' + '妇科正文。' * 10 + '</p></div></div>'),
+                 ('man.39.net', '<div class="art"><div class="content"><p>' + '男性正文。' * 10 + '</p></div></div>'),
+                 ('www.cnkang.com', '<table><tr><td id="iContent"><p>' + '皮肤过敏。' * 10 + '</p></td></tr></table>')]
+        for host, body in cases:
+            doc = parse_page(dict(doc_id=1, host=host, url=f'http://{host}/a/1.html', state='html_response',
+                                  content_type='text/html'), ('<title>T</title><body>' + body + '</body>').encode())
+            self.assertNotEqual(doc['status'], 'unknown_template', host)
+            self.assertIn('正文' if host.endswith('39.net') else '皮肤过敏', doc['text'])
+            self.assertNotIn('分享', doc['text'])
+        doc = parse_page(dict(doc_id=2, host='www.msdmanuals.cn', url='https://www.msdmanuals.cn/home/infections',
+                              state='html_response', content_type='text/html'),
+                         '<title>T</title><div class="Section_content__x"><a href="/a">感染概述</a></div>'.encode())
+        self.assertEqual((doc['page_type'], doc['status']), ('listing', 'needs_review'))
+        self.assertIn('chapter_index', doc['warnings'])
+
     def test_max_new_bounds_concurrent_fetches_and_keeps_remaining_pending(self):
         rows = [dict(doc_id=i, host=f'{i}.example.org', url=f'https://{i}.example.org/a')
                 for i in range(10)]
@@ -299,6 +360,39 @@ class PipelineChecks(unittest.TestCase):
             self.assertEqual(digest.call_count, 1)  # One archive checksum per batch.
         self.assertEqual({d['doc_id'] for _,d in store.results(db)}, {1, 7})
         store._raw_archive.close()
+        db.close()
+
+    def test_reparse_survives_batch_sealed_by_storage_connection_mid_run(self):
+        # Sealing writes through a second SQLite connection; reparse must not hold
+        # a stale WAL read snapshot across it (seen as "database is locked").
+        root = self.root / 'out' / 'shard-000-of-001'
+        (root / 'raw').mkdir(parents=True)
+        rows = [dict(doc_id=i, host='baoquangtri.vn', url=f'https://baoquangtri.vn/{i}') for i in range(1, 121)]
+        self.state(rows).close()
+        shutil.move(self.root / 'state.sqlite', root / 'state.sqlite')
+        db = sqlite3.connect(root / 'state.sqlite')
+        for row in rows:
+            raw = f'<div class="td-post-content"><p>Bài {row["doc_id"]}</p></div>'.encode()
+            page = dict(row, state='html_response', http_status=200, content_type='text/html',
+                        raw_path=f'raw/{row["doc_id"]}.gz', sha256=hashlib.sha256(raw).hexdigest())
+            (root / page['raw_path']).write_bytes(gzip.compress(raw))
+            db.execute('UPDATE jobs SET page=?,document=? WHERE doc_id=?', [json.dumps(page),
+                       json.dumps(dict(doc_id=row['doc_id'], status='needs_review', parser_version='old')), row['doc_id']])
+        db.commit()
+        db.close()
+        config = self.root / 'storage.json'
+        config.write_text('{}')
+        argv = ['crawl.py', '--reparse', '--parse-workers', '1', '--plan', str(self.args.plan),
+                '--output', str(self.root / 'out'), '--storage-config', str(config),
+                '--batch-docs', '50', '--progress-every', '1000']
+        local = lambda root, config, docs, mb, prune: storage.Storage(root, None, docs, mb, False)
+        with patch.object(sys, 'argv', argv), patch.object(crawl, 'Storage', side_effect=local), \
+                patch.object(crawl, 'write_report', side_effect=lambda root, storage=None: followup.write_report(root)):
+            crawl.main()
+        db = sqlite3.connect(root / 'state.sqlite')
+        versions = Counter(json.loads(d)['parser_version'] for (d,) in db.execute('SELECT document FROM jobs'))
+        self.assertEqual(versions, Counter({crawl.VERSION: 120}))
+        self.assertGreater(db.execute('SELECT count(*) FROM storage_batches').fetchone()[0], 0)
         db.close()
 
     def test_malformed_table_preserves_each_cell_once(self):
