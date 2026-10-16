@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import crawl
+import checkpoint_handoff
 import followup
 import prepare_recrawl
 import storage
@@ -223,6 +224,23 @@ class PipelineChecks(unittest.TestCase):
         asyncio.run(scenario())
         self.assertEqual(peaks['www.cnkang.com'], 2)
         self.assertEqual(peaks['39.net'], 1)
+
+    def test_handoff_snapshot_is_standalone_and_keeps_shard_identity(self):
+        db = self.state([dict(doc_id=1, host='example.org', url='https://example.org/a')])
+        db.execute('UPDATE jobs SET page=?,document=? WHERE doc_id=1', [
+            json.dumps(dict(state='html_response')),
+            json.dumps(dict(status='extracted_unreviewed'))])
+        db.commit()
+        snapshot = self.root / 'handoff.sqlite'
+        identity, saved, planned = checkpoint_handoff.snapshot_checkpoint(
+            self.root / 'state.sqlite', snapshot)
+        self.assertEqual(identity['shard_id'], 0)
+        self.assertEqual(identity['shard_count'], 1)
+        self.assertEqual((saved, planned), (1, 1))
+        self.assertTrue(snapshot.is_file())
+        self.assertEqual(checkpoint_handoff.handoff_prefix(identity),
+                         f"handoffs/{identity['plan_sha256']}/shard-000-of-001")
+        db.close()
 
     def test_quality_pause_survives_resume_and_other_hosts_continue(self):
         rows = [dict(doc_id=i, host='bad.example' if i <= 6 else 'good.example',

@@ -459,6 +459,66 @@ uv run python -m unittest discover -s tests -v
 ```
 
 
+## Crawl lại corpus 15/10/2026 (nhiều máy)
+
+Đây là lần crawl hiện hành, dùng plan theo ngôn ngữ trong `artifacts/recrawl_20261015/`. Chi tiết và lý do từng bước: [RECRAWL_RUNBOOK.md](docs/RECRAWL_RUNBOOK.md). Phần "Chạy toàn bộ corpus" phía trên là lịch sử của corpus cũ.
+
+Phân công: máy chính chạy **shard 0**, teammate chạy **shard 1**. Mỗi người có thể dùng nhiều máy (công ty, nhà) để tiếp tục tiến độ của nhau, với quy tắc:
+
+- **Tại mọi thời điểm chỉ một máy được chạy một shard.** Hai máy cùng shard ID sẽ ghi đè checkpoint.
+- Khi đổi máy: máy cũ dừng hoàn toàn, **publish** checkpoint; máy mới **fetch** checkpoint rồi mới resume. Không chạy crawl trước khi fetch, nếu không máy mới sẽ tạo checkpoint trống và lệnh fetch từ chối ghi đè.
+- Plan, storage config và parser phải cùng phiên bản trên mọi máy. Kiểm SHA-256 plan trước khi chạy.
+
+### Lệnh thường dùng
+
+```bash
+# Một lần, máy điều phối: tạo plan và thư mục Drive
+uv run python scripts/prepare_recrawl.py --prepare-cloud
+
+# Chạy thử 300 URL/ngôn ngữ, giữ raw local
+uv run python scripts/run_recrawl.py --shard-id 0 --max-new 300 --batch-docs 200 --keep-local
+
+# Chạy dài shard 0 (máy chính)
+uv run python scripts/run_recrawl.py --shard-id 0
+
+# Chạy dài shard 1 (máy teammate)
+uv run python scripts/run_recrawl.py --shard-id 1 --download
+
+# Xem tiến độ, không crawl thêm
+uv run python scripts/crawl.py --status --output artifacts/recrawl_20261015/vi --shard-count 2 --shard-id 0
+
+# Xuất danh sách lỗi/cần review
+uv run python scripts/view_followup.py --export artifacts/recrawl_20261015/failed_or_review.csv
+```
+
+### Đổi máy cho một shard
+
+Ví dụ chuyển ZH shard 1 từ máy công ty sang máy nhà:
+
+```bash
+# 1. Máy công ty: Ctrl+C, chờ thoát hẳn, rồi publish checkpoint
+uv run python scripts/checkpoint_handoff.py publish \
+  --root artifacts/recrawl_20261015/zh/shard-001-of-002 \
+  --config artifacts/recrawl_20261015/storage.zh.json \
+  --plan artifacts/recrawl_20261015/zh/plan.jsonl \
+  --shard-count 2 --shard-id 1 --prune-local
+
+# 2. Máy nhà: lấy plan/config, fetch checkpoint, rồi resume
+uv run python scripts/run_recrawl.py --shard-id 1 --download --download-only
+uv run python scripts/checkpoint_handoff.py fetch \
+  --root artifacts/recrawl_20261015/zh/shard-001-of-002 \
+  --config artifacts/recrawl_20261015/storage.zh.json \
+  --plan artifacts/recrawl_20261015/zh/plan.jsonl \
+  --shard-count 2 --shard-id 1
+uv run python scripts/run_recrawl.py --shard-id 1
+```
+
+Lặp lại theo từng ngôn ngữ đang chạy (`vi`, `zh`). EN hiện hoãn hoàn toàn, không có lệnh crawl EN.
+
+Exit code: `0` xong; `2` còn pending/hoãn, chạy lại để tiếp tục; `1` lỗi cần đọc log, upload hoặc cache trong `artifacts/recrawl_20261015/logs/`. Chỉ coi một đợt là xong khi exit là `0` hoặc `2` và upload đã được xác minh.
+
+Không tự retry các URL đã có kết quả lỗi. Reparse sau khi sửa parser chỉ chạy khi crawler của shard/ngôn ngữ đó đã dừng; xem mục "Danh sách cần quay lại xử lý" trong RECRAWL_RUNBOOK.
+
 ## Tài liệu tham chiếu trong repo
 
 - [Đề bài](OVERVIEW.md)
@@ -466,6 +526,7 @@ uv run python -m unittest discover -s tests -v
 - [Cách đánh giá](docs/EVALUATION.md)
 - [Định dạng nộp bài](docs/SUBMISSION.md)
 - [Template và ngoại lệ theo host](docs/HOST_TEMPLATES.md)
-- [Runbook thu thập và parse trên hai máy](docs/CRAWL_RUNBOOK.md)
+- [Runbook crawl lại corpus 15/10/2026](docs/RECRAWL_RUNBOOK.md)
+- [Runbook thu thập và parse trên hai máy (corpus cũ)](docs/CRAWL_RUNBOOK.md)
 - [Giải pháp V1](PROPOSED_SOLUTION.md)
 - [Tiến trình](PROGRESS.md)

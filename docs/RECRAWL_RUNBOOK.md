@@ -90,6 +90,37 @@ Mặc định đóng batch khi đạt 2.000 kết quả hoặc 128 MiB raw gzip.
 
 Cache raw/batch có mốc dừng 4 GiB; có thể vượt tạm thời và không bao gồm SQLite/report/log. Upload lỗi giữ dữ liệu local, runner báo lỗi; không tự lặp vô hạn. Giữ nguyên `state.sqlite`, WAL liên quan, plan và storage config để resume. Checkpoint SQLite hiện giữ local, chưa có backup định kỳ lên Drive; follow-up và batch cloud giúp kiểm kê/khôi phục dữ liệu nhưng không thay thế một checkpoint resume đầy đủ.
 
+### Bàn giao một shard sang máy khác
+
+Chỉ một máy được chạy một shard tại một thời điểm. Sau khi máy cũ dừng crawler hoàn toàn, lệnh
+`checkpoint_handoff.py publish` đóng/upload/xác minh mọi batch chưa đóng, tạo SQLite backup độc
+lập với WAL, rồi đưa snapshot và manifest SHA-256 vào Drive. Ví dụ bàn giao ZH shard 1:
+
+```bash
+uv run python scripts/checkpoint_handoff.py publish \
+  --root artifacts/recrawl_20261015/zh/shard-001-of-002 \
+  --config artifacts/recrawl_20261015/storage.zh.json \
+  --plan artifacts/recrawl_20261015/zh/plan.jsonl \
+  --shard-count 2 --shard-id 1 --prune-local
+```
+
+Máy nhận tải plan/config nhưng chưa chạy crawler, rồi tải checkpoint. Lệnh fetch từ chối ghi đè
+checkpoint local, xác minh checksum của manifest/state và kiểm identity của plan/shard trước khi
+đặt `state.sqlite`:
+
+```bash
+uv run python scripts/run_recrawl.py --shard-id 1 --download --download-only
+uv run python scripts/checkpoint_handoff.py fetch \
+  --root artifacts/recrawl_20261015/zh/shard-001-of-002 \
+  --config artifacts/recrawl_20261015/storage.zh.json \
+  --plan artifacts/recrawl_20261015/zh/plan.jsonl \
+  --shard-count 2 --shard-id 1
+```
+
+Lặp lại theo từng ngôn ngữ đang chạy, rồi resume bằng cùng plan/shard/config. Không dùng
+`--download` của runner để crawl trước khi fetch checkpoint; máy mới sẽ tạo checkpoint trống và
+fetch sẽ từ chối ghi đè nó.
+
 ## Danh sách cần quay lại xử lý
 
 Mỗi shard có `followup/documents.csv.gz`, cập nhật khoảng 5 phút trong lúc crawl và lúc kết thúc, đồng thời upload lên đúng folder shard. Có thể khởi tạo báo cáo cả shard chưa chạy mà không gửi HTTP:

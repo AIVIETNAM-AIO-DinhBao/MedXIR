@@ -14,4 +14,10 @@ uv run python scripts/run_recrawl.py --shard-id 1 --download
 
 Chỉ giải nén sau khi checksum báo OK. Runner tải manifest, ba plan và storage config; kiểm hash plan rồi chạy shard 1, tự resume nếu có checkpoint. Mặc định tổng 16 worker, 8 VI + 8 ZH; EN hoãn và có báo cáo riêng. Không chạy shard 0 trên máy B.
 
+Nếu shard 1 đã chạy trên một máy tạm rồi bàn giao lại, dùng `--download --download-only`, sau đó
+chạy `scripts/checkpoint_handoff.py fetch` cho từng ngôn ngữ theo hướng dẫn trong
+`docs/RECRAWL_RUNBOOK.md`. Không chạy runner trước khi fetch, vì checkpoint trống sẽ làm fetch từ
+từ chối ghi đè. Source snapshot trên máy B phải chứa `scripts/checkpoint_handoff.py`; dùng source
+mới nhất từ máy bàn giao hoặc cập nhật checkout trước khi bắt đầu.
+
 Lệnh trên chạy foreground; giữ terminal hoặc dùng tmux. Ctrl+C dừng các child và giữ checkpoint. Chạy lại đúng lệnh cuối để resume. Log, trạng thái và danh sách ID cần xử lý nằm trong `artifacts/recrawl_20261015/`; chi tiết ở `docs/RECRAWL_RUNBOOK.md`.

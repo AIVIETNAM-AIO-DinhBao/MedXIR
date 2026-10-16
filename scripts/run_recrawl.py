@@ -48,11 +48,17 @@ def main():
     parser.add_argument('--followup-every', type=float, default=300)
     parser.add_argument('--initialize-only', action='store_true', help='Publish initial queues without fetching')
     parser.add_argument('--download', action='store_true', help='Download and verify shared plans/configs first')
+    parser.add_argument('--download-only', action='store_true',
+                        help='Download plans/configs then exit; useful before checkpoint handoff fetch')
     parser.add_argument('--storage-config', type=Path, default=Path('storage.json'))
     parser.add_argument('--keep-local', action='store_true', help='Retain verified raw/batches for initial checks')
     args = parser.parse_args()
     if args.download:
         download(args.output, args.storage_config)
+    if args.download_only:
+        if not args.download:
+            parser.error('--download-only requires --download')
+        return
     manifest = json.loads((args.output / 'manifest.json').read_text())
     shard_count = manifest['shard_count']
     if not 0 <= args.shard_id < shard_count or args.workers < 1 or args.max_new < 0:
