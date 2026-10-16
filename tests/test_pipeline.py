@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -192,6 +193,36 @@ class PipelineChecks(unittest.TestCase):
         asyncio.run(scenario())
         self.assertEqual(len(starts), 3)
         self.assertTrue(all(b-a >= .025 for a,b in zip(starts, starts[1:])))
+
+    def test_rate_group_policy_can_raise_cnkang_concurrency_without_changing_39_net(self):
+        active, peaks = Counter(), Counter()
+
+        async def request(request):
+            group = crawl.rate_group(request.url.host)
+            active[group] += 1
+            peaks[group] = max(peaks[group], active[group])
+            await asyncio.sleep(.02)
+            active[group] -= 1
+            return httpx.Response(200, text='<p>OK</p>')
+
+        async def scenario():
+            self.args.host_workers = 1
+            self.args.delay = 0
+            self.args.rate_limits = {
+                'www.cnkang.com': dict(host_workers=2, delay=0),
+                '39.net': dict(host_workers=1, delay=0),
+            }
+            async with httpx.AsyncClient(transport=httpx.MockTransport(request)) as client:
+                downloader = crawl.Downloader(client, self.args)
+                await asyncio.gather(
+                    downloader.fetch('https://www.cnkang.com/a'),
+                    downloader.fetch('https://www.cnkang.com/b'),
+                    downloader.fetch('https://ask.39.net/a'),
+                    downloader.fetch('https://baby.39.net/b'))
+
+        asyncio.run(scenario())
+        self.assertEqual(peaks['www.cnkang.com'], 2)
+        self.assertEqual(peaks['39.net'], 1)
 
     def test_quality_pause_survives_resume_and_other_hosts_continue(self):
         rows = [dict(doc_id=i, host='bad.example' if i <= 6 else 'good.example',

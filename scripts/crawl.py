@@ -156,7 +156,7 @@ def open_state(args, root):
         started_at=utc_now(), parser_version=VERSION, workers=args.workers,
         host_workers=args.host_workers,
         delay=args.delay, effective_delay=args.delay * args.shard_count,
-        timeout=args.timeout, retries=args.retries))])
+        rate_limits=getattr(args, 'rate_limits', {}), timeout=args.timeout, retries=args.retries))])
     if not db.execute("SELECT 1 FROM metadata WHERE key='plan_loaded'").fetchone():
         deferred = {}
         languages = set()
@@ -218,6 +218,34 @@ def rate_group(host):
     return host
 
 
+def load_rate_limits(path, default_workers, default_delay):
+    """Load optional per-rate-group limits without weakening the safe defaults."""
+    defaults = dict(host_workers=default_workers, delay=default_delay)
+    if path is None:
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f'Invalid rate-limit config {path}: {error}') from error
+    groups = payload.get('groups') if isinstance(payload, dict) else None
+    if not isinstance(groups, dict):
+        raise ValueError('Rate-limit config must contain an object named "groups"')
+    policies = {}
+    for group, values in groups.items():
+        normalized = group.lower()
+        if not isinstance(group, str) or not normalized or rate_group(normalized) != normalized:
+            raise ValueError(f'Rate-limit key must be a canonical rate group: {group!r}')
+        if not isinstance(values, dict) or set(values) - {'host_workers', 'delay'}:
+            raise ValueError(f'Invalid rate-limit policy for {group!r}')
+        policy = defaults | values
+        if (isinstance(policy['host_workers'], bool) or not isinstance(policy['host_workers'], int)
+                or policy['host_workers'] < 1 or not isinstance(policy['delay'], (int, float))
+                or isinstance(policy['delay'], bool) or policy['delay'] < 0):
+            raise ValueError(f'Invalid worker/delay values for {group!r}')
+        policies[normalized] = policy
+    return policies
+
+
 class HostPaused(Exception):
     pass
 
@@ -229,15 +257,25 @@ class Downloader:
         self.args = args
         self.slots = asyncio.Semaphore(args.workers)
         self.locks = defaultdict(asyncio.Lock)
-        self.host_slots = defaultdict(lambda: asyncio.Semaphore(args.host_workers))
+        self.host_slots = {}
         self.next_request = defaultdict(float)
         self.paused_groups = set()
+
+    def policy(self, group):
+        return getattr(self.args, 'rate_limits', {}).get(group, dict(
+            host_workers=self.args.host_workers, delay=self.args.delay))
+
+    def host_slot(self, group):
+        if group not in self.host_slots:
+            self.host_slots[group] = asyncio.Semaphore(self.policy(group)['host_workers'])
+        return self.host_slots[group]
 
     async def get(self, url):
         host = rate_group(urlsplit(url).hostname)
         if host in self.paused_groups:
             raise HostPaused(host)
-        async with self.host_slots[host]:
+        policy = self.policy(host)
+        async with self.host_slot(host):
             # Serialize request starts, while allowing previous responses to finish in parallel.
             async with self.locks[host]:
                 while self.next_request[host] > time.monotonic():
@@ -252,7 +290,7 @@ class Downloader:
                 except BaseException:
                     self.slots.release()
                     raise
-                self.next_request[host] = time.monotonic() + self.args.delay * self.args.shard_count
+                self.next_request[host] = time.monotonic() + policy['delay'] * self.args.shard_count
             try:
                 # Queue/rate-limit waiting is not a network timeout.
                 async with asyncio.timeout(self.args.timeout * 2), self.client.stream('GET', url) as response:
@@ -595,6 +633,8 @@ def main():
     parser.add_argument('--workers', type=int, default=12, help='Maximum active HTTP requests')
     parser.add_argument('--host-workers', type=int, default=1, help='Maximum parallel requests per hostname')
     parser.add_argument('--delay', type=float, default=1.5, help='Seconds between starts per hostname')
+    parser.add_argument('--rate-limits', type=Path,
+                        help='JSON overrides by canonical rate group: host_workers and/or delay')
     parser.add_argument('--timeout', type=float, default=20)
     parser.add_argument('--retries', type=int, default=2, help='Additional attempts per URL')
     parser.add_argument('--max-bytes', type=int, default=10 * 1024 * 1024)
@@ -643,6 +683,10 @@ def main():
     if args.storage_config and not args.storage_config.is_file():
         parser.error('Missing shared storage config. Log in with rclone config, then run '
                      'python scripts/storage.py init to create storage.json')
+    try:
+        args.rate_limits = load_rate_limits(args.rate_limits, args.host_workers, args.delay)
+    except ValueError as error:
+        parser.error(str(error))
     if args.resume and (not (root / 'state.sqlite').is_file() or not args.plan.is_file()):
         parser.error('--resume requires an existing checkpoint and plan for this shard')
     prepare_plan(args)

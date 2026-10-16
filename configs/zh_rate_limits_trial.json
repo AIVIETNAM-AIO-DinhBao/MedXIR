@@ -1,0 +1,12 @@
+{
+  "groups": {
+    "www.cnkang.com": {
+      "host_workers": 2,
+      "delay": 0.5
+    },
+    "39.net": {
+      "host_workers": 1,
+      "delay": 0.5
+    }
+  }
+}

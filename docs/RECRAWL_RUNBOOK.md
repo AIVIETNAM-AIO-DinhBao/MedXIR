@@ -63,6 +63,11 @@ Runner tự resume nếu checkpoint đã có. Mặc định tổng ngân sách 1
 
 Tăng worker chỉ sau khi quan sát timeout, chặn và CPU. Parser chạy trong thread khi crawl; `--parse-workers` chỉ điều khiển process khi reparse riêng.
 
+Khi số URL còn lại dồn vào ít rate group, `--workers` tổng không làm nhanh hơn. Có thể truyền
+`--rate-limits CONFIG.json` để chỉ tăng song song cho một group đã thử nghiệm. Ví dụ thử ZH tại
+`configs/zh_rate_limits_trial.json` giữ toàn bộ `39.net` ở một request nhưng cho
+`www.cnkang.com` hai response đồng thời; delay khởi tạo request vẫn là 0,5 giây.
+
 ## Upload và giữ dữ liệu
 
 Cấu trúc cho mỗi ngôn ngữ:
