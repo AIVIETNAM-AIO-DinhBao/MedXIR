@@ -1,0 +1,6 @@
+{
+  "groups": {
+    "suckhoecongdongonline.vn": {"host_workers": 2, "delay": 0.25},
+    "nhathuoclongchau.com.vn": {"host_workers": 1, "delay": 1.0}
+  }
+}

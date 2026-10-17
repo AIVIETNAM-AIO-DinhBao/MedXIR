@@ -641,6 +641,8 @@ def main():
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--resume', action='store_true', help='Require an existing checkpoint and continue it')
     parser.add_argument('--retry-paused', action='store_true', help='Allow pending URLs of paused hosts to run again')
+    parser.add_argument('--retry-host', action='append', default=[], metavar='HOST',
+                        help='Unpause only this paused host (repeatable); other pauses and deferrals stay')
     parser.add_argument('--status', action='store_true', help='Read progress without crawling or changing the plan')
     parser.add_argument('--progress-every', type=int, default=25, help='Print progress every N completed URLs')
     parser.add_argument('--export-only', action='store_true', help='Export saved checkpoints without fetching')
@@ -669,8 +671,9 @@ def main():
         parser.error('--reparse-plan requires --reparse')
     if args.fresh_plan and args.exclude_completed:
         parser.error('--fresh-plan cannot exclude historical checkpoints')
-    if args.retry_paused and any((args.status, args.prepare_only, args.export_only, args.reparse, args.followup_only)):
-        parser.error('--retry-paused is only for crawling pending URLs')
+    if (args.retry_paused or args.retry_host) and any((args.status, args.prepare_only, args.export_only,
+                                                        args.reparse, args.followup_only)):
+        parser.error('--retry-paused/--retry-host are only for crawling pending URLs')
     if sum((args.status, args.prepare_only, args.export_only, args.reparse, args.followup_only)) > 1:
         parser.error('Choose one mode: --status, --prepare-only, --export-only, or --reparse')
     root = args.output / f'shard-{args.shard_id:03d}-of-{args.shard_count:03d}'
@@ -716,6 +719,14 @@ def main():
         if args.retry_paused:
             paused = {}
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts','{}')")
+            db.commit()
+        if unknown := [h for h in args.retry_host if h not in paused]:
+            db.close()
+            parser.error(f'Not paused: {", ".join(unknown)}; paused hosts: {", ".join(sorted(paused))}')
+        if args.retry_host:
+            for host in args.retry_host:
+                print(f'Retrying paused host {host}: {paused.pop(host)}', flush=True)
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts',?)", [json.dumps(paused)])
             db.commit()
         started = time.monotonic()
         try:

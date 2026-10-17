@@ -15,7 +15,7 @@ from html import unescape
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-VERSION = 'parser-v2.4'
+VERSION = 'parser-v2.5'
 
 # Public CMS renderer: dSecurity.b7 in dcore-2.2.0.d7.204.js and
 # dcms.decode in cmsfcore.dg72.js (baophutho.vn / baothanhhoa.vn).
@@ -166,7 +166,10 @@ for host in [h for h in RULES if h.endswith('.39.net')]:
     RULES[host] += [s for s in ('.art > .content', '.artbox > .article', 'body > .wrap:not(.tools):has(> p)')
                     if s not in RULES[host]]
 RULES['www.cnkang.com'].append('td#iContent')
-RULES['suckhoedoisong.vn'].append('.detail-container [data-role="video-autoplay"]')
+RULES['suckhoedoisong.vn'] += ['.detail-container [data-role="video-autoplay"]',
+                               # e-magazine layout and video articles whose body is only the player.
+                               '.sp-detail-content', '.detail-frame-video']
+RULES['vov2.vov.vn'].append('article.node--emagazine .content.node-emagazine')
 RULES['dantri.com.vn'].append('main > .video-highlight, main > .video-grid')
 
 SUMMARY_SELECTORS = '.article__sapo, .detail-sapo, .detail__sapo, .post-summary, .sc-longform-header-sapo, .content-detail-sapo, .article-summary, .art_summary'
@@ -567,9 +570,11 @@ def parse_page(record, raw):
     missing_data = host == 'www.vinmec.com' and not soup.select_one('.box_quizz_detail') and (
         main_article is None or not text(main_article) and not main_article.select_one('img,audio,video,iframe')) and any(
         text(node).startswith('Không tìm thấy dữ liệu bạn yêu cầu') for node in soup.select('#modal-api-error p'))
-    if fatal or soft404 or missing_data:
+    # Members-only articles answer with the WordPress login page instead of the post.
+    login_wall = host == 'thaythuocvietnam.vn' and result['title'].startswith('Đăng nhập')
+    if fatal or soft404 or missing_data or login_wall:
         result.update(status='source_error', page_type='error', selected_source_text=body_text)
-        warnings.append('source_error_in_html')
+        warnings.append('login_required' if login_wall else 'source_error_in_html')
         return result
     regions = []
     if host == 'nhathuoclongchau.com.vn':
@@ -608,12 +613,19 @@ def parse_page(record, raw):
             nodes = top_nodes(soup.select(selector))
             if host == 'www.wujue.com' and selector == '#article-main_left #art-leftbox':
                 nodes = [n for n in nodes if text(n).startswith('图片简介')]
-            if nodes and (any(text(n) for n in nodes) or any(n.select_one('img,iframe,audio,video,[data-url],[data-vid]') for n in nodes)):
+            if nodes and (any(text(n) for n in nodes) or any(n.select_one('img,iframe,audio,video,embed[src],[data-url],[data-vid]') for n in nodes)):
                 result['selectors'] = [selector]
                 regions = [(n, 'body') for n in nodes]
                 break
     if not regions:
         listing = soup.select_one('.timeline, .timeline.content-list') if host in {'nhandan.vn', 'baogialai.com.vn'} else None
+        candidate_exists = any(soup.select_one(selector) for selector in RULES.get(host, []))
+        summary = next((n for n in soup.select(SUMMARY_SELECTORS) if text(n)), None) if candidate_exists else None
+        # Long prose elsewhere means the body moved (template change), not an empty source body.
+        if summary and any(len(text(p)) >= 80 for p in soup.select('p')
+                           if not p.find_parent(['header', 'footer', 'nav', 'aside']) and summary not in p.parents
+                           and p is not summary):
+            summary = None
         if listing:
             regions = [(listing, 'listing')]
             result['selectors'] = ['.timeline']
@@ -624,8 +636,12 @@ def parse_page(record, raw):
             result['page_type'] = 'homepage'
             result['selected_source_text'] = text(soup.body or soup)
             return result
+        elif summary:
+            # The source published only the lead: the article body element is empty.
+            regions = [(summary, 'summary')]
+            result['selectors'] = [SUMMARY_SELECTORS]
+            warnings.append('body_empty_in_source')
         else:
-            candidate_exists = any(soup.select_one(selector) for selector in RULES.get(host, []))
             result['status'] = 'empty_content' if candidate_exists else 'unknown_template'
             if candidate_exists:
                 warnings.append('content_region_empty')
@@ -718,7 +734,7 @@ def parse_page(record, raw):
                                           text=text(node), url=node['href']))
             node.decompose()
         # Resources in identified UI have already been removed.
-        for node in root.select('img, audio, video, source, iframe, a[href], [data-url], [data-src], [data-vid]'):
+        for node in root.select('img, audio, video, source, iframe, embed[src], a[href], [data-url], [data-src], [data-vid]'):
             target = node.get('data-url') or node.get('data-vid') or node.get('data-src') or node.get('data-original') or node.get('data-lazy-src') or node.get('src') or node.get('href')
             if not target or target.startswith(('data:', 'javascript:')):
                 continue

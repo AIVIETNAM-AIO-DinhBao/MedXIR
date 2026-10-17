@@ -224,6 +224,27 @@ class PipelineChecks(unittest.TestCase):
         self.assertEqual((doc['page_type'], doc['status']), ('listing', 'needs_review'))
         self.assertIn('chapter_index', doc['warnings'])
 
+    def test_vi_magazine_video_login_and_empty_body_pages(self):
+        def parse(host, html, url='https://example.vn/a.htm'):
+            return parse_page(dict(doc_id=1, host=host, url=url, state='html_response',
+                                   content_type='text/html'), ('<title>T</title>' + html).encode())
+        body = '<p>' + 'Nội dung tạp chí. ' * 20 + '</p>'
+        self.assertIn('Nội dung tạp chí', parse('suckhoedoisong.vn', f'<div class="sp-detail-content">{body}</div>')['text'])
+        self.assertIn('Nội dung tạp chí', parse('vov2.vov.vn', '<article class="node node--emagazine">'
+                                                f'<div class="content node-emagazine">{body}</div></article>')['text'])
+        sapo = '<h2 class="detail-sapo">SKĐS - Tóm tắt bài video.</h2><div class="detail-content"></div>'
+        doc = parse('suckhoedoisong.vn', sapo + '<div class="detail-frame-video"><div data-vid="v.mp4"></div></div>')
+        self.assertEqual(doc['text'], 'SKĐS - Tóm tắt bài video.')
+        self.assertIn('media_transcript_not_verified', doc['warnings'])
+        doc = parse('suckhoedoisong.vn', sapo)
+        self.assertIn('body_empty_in_source', doc['warnings'])
+        self.assertEqual(doc['status'], 'needs_review')
+        # Prose elsewhere means the template changed: keep it a parser failure.
+        doc = parse('suckhoedoisong.vn', sapo + '<section>' + body + '</section>')
+        self.assertEqual(doc['status'], 'empty_content')
+        doc = parse('thaythuocvietnam.vn', '<meta property="og:title" content="Đăng nhập - Thầy Thuốc Việt Nam">')
+        self.assertEqual((doc['status'], doc['warnings']), ('source_error', ['login_required']))
+
     def test_max_new_bounds_concurrent_fetches_and_keeps_remaining_pending(self):
         rows = [dict(doc_id=i, host=f'{i}.example.org', url=f'https://{i}.example.org/a')
                 for i in range(10)]
@@ -436,6 +457,30 @@ class PipelineChecks(unittest.TestCase):
             plan.write_text(json.dumps(dict(doc_id=9, host='x.org', url='https://x.org/1')) + '\n')
             pubmed_europepmc.open_state(self.root / 'other', plan)
         db.close()
+
+    def test_retry_host_unpauses_only_named_hosts(self):
+        root = self.root / 'out' / 'shard-000-of-001'
+        (root / 'raw').mkdir(parents=True)
+        self.state([dict(doc_id=1, host='a.vn', url='https://a.vn/1')]).close()
+        shutil.move(self.root / 'state.sqlite', root / 'state.sqlite')
+        paused = {'a.vn': dict(reason='parser_quality'), 'b.vn': dict(reason='deferred:blocked')}
+        with sqlite3.connect(root / 'state.sqlite') as db:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts',?)", [json.dumps(paused)])
+        seen = []
+        async def fake_run(args, db, root, started, paused, storage=None):
+            seen.append(dict(paused))
+        argv = ['crawl.py', '--resume', '--plan', str(self.args.plan), '--output', str(self.root / 'out')]
+        with patch.object(crawl, 'run', side_effect=fake_run), patch.object(crawl, 'write_report',
+                side_effect=lambda root, storage=None: followup.write_report(root)):
+            with patch.object(sys, 'argv', argv + ['--retry-host', 'a.vn']), self.assertRaises(SystemExit):
+                crawl.main()  # Exit 2: the job is still pending in this fake run.
+            with patch.object(sys, 'argv', argv + ['--retry-host', 'c.vn']), self.assertRaises(SystemExit), \
+                    patch('sys.stderr'):
+                crawl.main()
+        self.assertEqual(seen, [{'b.vn': dict(reason='deferred:blocked')}])
+        with sqlite3.connect(root / 'state.sqlite') as db:
+            saved = json.loads(db.execute("SELECT value FROM metadata WHERE key='paused_hosts'").fetchone()[0])
+        self.assertEqual(saved, {'b.vn': dict(reason='deferred:blocked')})
 
     def test_malformed_table_preserves_each_cell_once(self):
         soup = BeautifulSoup('<table><tr><td>A<td>B<tr><td>C<td>D</table>', 'html.parser')
