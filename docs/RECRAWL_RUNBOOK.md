@@ -70,6 +70,23 @@ Khi số URL còn lại dồn vào ít rate group, `--workers` tổng không là
 `configs/zh_rate_limits_trial.json` giữ toàn bộ `39.net` ở một request nhưng cho
 `www.cnkang.com` hai response đồng thời; delay khởi tạo request vẫn là 0,5 giây.
 
+## Tiếng Anh: PubMed qua Europe PMC
+
+EN gồm 240.000 URL `pubmed.ncbi.nlm.nih.gov/<PMID>/`. NCBI chặn mạng này cả trang web lẫn E-utilities (chuyển về trang misuse), nên không crawl HTML. [Europe PMC](https://europepmc.org/RestfulWebService) đồng bộ MEDLINE (`SRC:MED`) với title, abstract, MeSH. Một máy chạy toàn bộ EN, không chia shard; checkpoint EN của crawler giữ nguyên trạng thái hoãn.
+
+```bash
+# Thử 1.000 ID (đã chạy 17/10/2026: 1.000/1.000 có abstract, upload đã xác minh)
+uv run python scripts/pubmed_europepmc.py --limit 1000
+# Toàn bộ, tự resume; khoảng 1 giờ 45 phút
+uv run python scripts/pubmed_europepmc.py
+uv run python scripts/pubmed_europepmc.py --status
+uv run python scripts/pubmed_europepmc.py --export en_documents.jsonl.gz
+```
+
+Mỗi request 100 PMID, cách 1 giây, tự lùi khi 429/5xx. Checkpoint ở `artifacts/recrawl_20261015/en/europepmc/state.sqlite`; batch `documents.jsonl.gz` + bản ghi gốc `records.jsonl.gz` lên `MedXIR/en/europepmc/<plan_sha>/batches/`, follow-up ở `.../followup/`. Document cùng schema với parser (`blocks` title/abstract, heading của abstract có cấu trúc), `parser_version=europepmc-v1`. `abstract_missing` (chỉ có title) là `needs_review`; PMID không có trong Europe PMC là `not_found`. Bài gốc không phải tiếng Anh vẫn có abstract tiếng Anh; ngôn ngữ gốc nằm ở `source_metadata.language`. Exit 2 còn ID chưa lấy, exit 1 dừng do lỗi; chạy lại cùng lệnh để tiếp tục.
+
+Kết quả 17/10/2026: 239.358 có abstract, 413 chỉ có title (MEDLINE không có abstract: editorial, thư, kỷ yếu; giữ nguyên, không lấy "abstract" từ nguồn khác vì không phải nội dung trang PubMed), 229 không có trong Europe PMC (phần lớn preprint medRxiv/bioRxiv/Research Square mà Europe PMC không gắn PMID). `--fill-openalex` tra các ID `not_found` trên [OpenAlex](https://docs.openalex.org/): 158 có abstract, 19 chỉ title, ghi `source=openalex`, `parser_version=openalex-v1`; bản mới nằm trong batch mới, bản cũ giữ nguyên. Còn 52 ID không có ở cả hai nguồn, danh sách tại `en/europepmc/not_found_pmids.txt`; NCBI E-utilities vẫn chặn mạng này, cần chạy từ mạng khác.
+
 ## Upload và giữ dữ liệu
 
 Cấu trúc cho mỗi ngôn ngữ:

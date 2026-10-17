@@ -40,6 +40,23 @@ def command(*args):
     return result.stdout
 
 
+def verify_remote(remote, expected):
+    # Verify bytes independently of the backend's advertised checksum algorithms.
+    process = subprocess.Popen([rclone(), 'cat', remote, '--retries', '3', '--timeout', '60s'],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    digest = hashlib.sha256()
+    try:
+        while chunk := process.stdout.read(1024 * 1024):
+            digest.update(chunk)
+        if process.wait() or digest.hexdigest() != expected:
+            raise ValueError(f'Remote SHA-256 mismatch/read failure: {remote}')
+    finally:
+        process.stdout.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
 def remote_settings(remote):
     settings = configparser.ConfigParser(interpolation=None)
     settings.read_string(command('config', 'redacted', remote).decode())
@@ -244,20 +261,7 @@ class Storage:
         print(f'Verified on cloud storage: {manifest["batch_id"]}', flush=True)
 
     def verify_remote(self, remote, expected):
-        # Verify bytes independently of the backend's advertised checksum algorithms.
-        process = subprocess.Popen([rclone(), 'cat', remote, '--retries', '3', '--timeout', '60s'],
-                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        digest = hashlib.sha256()
-        try:
-            while chunk := process.stdout.read(1024 * 1024):
-                digest.update(chunk)
-            if process.wait() or digest.hexdigest() != expected:
-                raise ValueError(f'Remote SHA-256 mismatch/read failure: {remote}')
-        finally:
-            process.stdout.close()
-            if process.poll() is None:
-                process.kill()
-                process.wait()
+        verify_remote(remote, expected)
 
     def evict(self, manifest):
         """Keep status/provenance locally; full documents and raw remain in the batch."""

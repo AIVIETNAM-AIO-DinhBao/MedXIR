@@ -26,6 +26,7 @@ import crawl
 import checkpoint_handoff
 import followup
 import prepare_recrawl
+import pubmed_europepmc
 import storage
 from content_parser import blocks_from, parse_page
 
@@ -393,6 +394,47 @@ class PipelineChecks(unittest.TestCase):
         versions = Counter(json.loads(d)['parser_version'] for (d,) in db.execute('SELECT document FROM jobs'))
         self.assertEqual(versions, Counter({crawl.VERSION: 120}))
         self.assertGreater(db.execute('SELECT count(*) FROM storage_batches').fetchone()[0], 0)
+        db.close()
+
+    def test_europepmc_records_become_documents_and_missing_ids_are_reported(self):
+        plan = self.root / 'en.jsonl'
+        plan.write_text(''.join(json.dumps(dict(doc_id=i, host='pubmed.ncbi.nlm.nih.gov',
+                        url=f'https://pubmed.ncbi.nlm.nih.gov/{pmid}/')) + '\n'
+                        for i, pmid in [(1, '11'), (2, '22'), (3, '33')]))
+        db, plan_sha = pubmed_europepmc.open_state(self.root / 'epmc', plan)
+        records = [dict(id='11', source='MED', title='A <i>trial</i>.', pubYear='2020',
+                        abstractText='<h4>Background</h4>Why it <sup>2</sup>matters.<h4>Results</h4>It worked.'),
+                   dict(id='22', source='MED', title='Title only.')]
+        def respond(request):
+            self.assertIn('EXT_ID:11 OR EXT_ID:22 OR EXT_ID:33', request.url.params['query'])
+            return httpx.Response(200, json=dict(hitCount=2, resultList=dict(result=records)))
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            found = pubmed_europepmc.search(client, ['11', '22', '33'])
+        docs = {pmid: pubmed_europepmc.to_document(i, f'u{i}', pmid, found.get(pmid), 't')
+                for i, pmid in [(1, '11'), (2, '22'), (3, '33')]}
+        self.assertEqual([(b['kind'], b['text']) for b in docs['11']['blocks']],
+                         [('heading', 'A trial.'), ('heading', 'Background'), ('paragraph', 'Why it 2matters.'),
+                          ('heading', 'Results'), ('paragraph', 'It worked.')])
+        self.assertEqual(docs['11']['status'], 'extracted_unreviewed')
+        self.assertEqual((docs['22']['status'], docs['22']['warnings']), ('needs_review', ['abstract_missing']))
+        self.assertEqual(docs['33']['status'], 'not_found')
+        with db:
+            for i, pmid in [(1, '11'), (2, '22'), (3, '33')]:
+                db.execute('UPDATE items SET status=?,document=?,record=? WHERE doc_id=?',
+                           [docs[pmid]['status'], json.dumps(docs[pmid]), json.dumps(found.get(pmid)), i])
+        self.assertTrue(pubmed_europepmc.seal(db, self.root / 'epmc', plan_sha, 10, force=True))
+        counts = pubmed_europepmc.write_report(db, self.root / 'epmc', plan_sha, None)
+        self.assertEqual(counts, Counter(extracted_unreviewed=1, needs_review=1, not_found=1))
+        with gzip.open(self.root / 'epmc' / 'followup' / 'documents.csv.gz', 'rt') as report:
+            self.assertEqual([row.split(',')[3] for row in report.read().splitlines()[1:]], ['needs_review', 'not_found'])
+        work = dict(id='https://openalex.org/W1', title='Preprint.', type='preprint',
+                    abstract_inverted_index={'Viral': [0], 'load': [1, 4], 'and': [3], 'fell': [2]})
+        doc = pubmed_europepmc.openalex_document(3, 'u3', '33', work, 't')
+        self.assertEqual((doc['source'], doc['status'], doc['blocks'][1]['text']),
+                         ('openalex', 'extracted_unreviewed', 'Viral load fell and load'))
+        with self.assertRaisesRegex(ValueError, 'Not a PubMed'):
+            plan.write_text(json.dumps(dict(doc_id=9, host='x.org', url='https://x.org/1')) + '\n')
+            pubmed_europepmc.open_state(self.root / 'other', plan)
         db.close()
 
     def test_malformed_table_preserves_each_cell_once(self):

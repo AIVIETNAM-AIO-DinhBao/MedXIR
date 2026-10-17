@@ -513,7 +513,7 @@ uv run python scripts/checkpoint_handoff.py fetch \
 uv run python scripts/run_recrawl.py --shard-id 1
 ```
 
-Lặp lại theo từng ngôn ngữ đang chạy (`vi`, `zh`). EN hiện hoãn hoàn toàn, không có lệnh crawl EN.
+Lặp lại theo từng ngôn ngữ đang chạy (`vi`, `zh`). EN (PubMed) không crawl: một máy lấy toàn bộ qua Europe PMC bằng `uv run python scripts/pubmed_europepmc.py` (tự resume, xem `--status`); chi tiết trong RECRAWL_RUNBOOK.
 
 Exit code: `0` xong; `2` còn pending/hoãn, chạy lại để tiếp tục; `1` lỗi cần đọc log, upload hoặc cache trong `artifacts/recrawl_20261015/logs/`. Chỉ coi một đợt là xong khi exit là `0` hoặc `2` và upload đã được xác minh.
 
