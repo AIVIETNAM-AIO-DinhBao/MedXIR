@@ -8,7 +8,7 @@ Bạn có thể truy cập và tải toàn bộ Dataset trên HuggingFace tại 
 
 **Ban Tổ chức cung cấp:**
 
-- **Danh sách nguồn dữ liệu:** Các liên kết trong `links_corpus.parquet` để các đội chủ động thu thập, xử lý và xây dựng cơ sở tri thức phục vụ truy hồi.
+- **Danh sách nguồn dữ liệu:** Các liên kết trong `links_corpus_vi_en_zh.parquet` để các đội chủ động thu thập, xử lý và xây dựng cơ sở tri thức phục vụ truy hồi.
 - **Bộ dữ liệu kiểm thử (test set):** Tập câu hỏi bằng tiếng Việt, được sử dụng làm căn cứ chấm điểm và đánh giá hệ thống của các đội thi.
 
 Ban Tổ chức không cung cấp quy trình embedding/indexing sẵn có. Các đội thi được toàn quyền chủ động trong việc:
@@ -43,7 +43,7 @@ Tập câu hỏi truy vấn được cung cấp trong tệp `query.parquet`, g�
 
 ### Nguồn dữ liệu được cung cấp
 
-Ban Tổ chức cung cấp danh sách URL của các bài viết y khoa trong tệp `links_corpus.parquet`, gồm:
+Ban Tổ chức cung cấp danh sách URL của các bài viết y khoa trong tệp `links_corpus_vi_en_zh.parquet`, gồm:
 
 - **id:** Mã định danh của nguồn, kiểu số nguyên (integer).
 - **url:** URL dẫn tới bài viết gốc, kiểu chuỗi (string).
@@ -66,4 +66,4 @@ Ban Tổ chức cung cấp danh sách URL của các bài viết y khoa trong t�
 
 Các đội tự thực hiện việc thu thập nội dung từ các URL được cung cấp, tiền xử lý, phân đoạn và xây dựng cơ sở tri thức phục vụ truy hồi.
 
-Trong phiên bản đánh giá này, mọi nhãn tài liệu đều sử dụng trường `id` kiểu số nguyên có trong `links_corpus.parquet`. Tài liệu nằm ngoài danh sách này không được tính là nhãn dương.
+Trong phiên bản đánh giá này, mọi nhãn tài liệu đều sử dụng trường `id` kiểu số nguyên có trong `links_corpus_vi_en_zh.parquet`. Tài liệu nằm ngoài danh sách này không được tính là nhãn dương.

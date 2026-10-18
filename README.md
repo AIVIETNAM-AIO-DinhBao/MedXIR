@@ -47,7 +47,7 @@ uv sync
 Trong IDE, chọn interpreter/kernel `.venv/bin/python` để chạy notebook. Đặt dữ liệu được cấp tại:
 
 ```text
-dataset/links_corpus.parquet
+dataset/links_corpus_vi_en_zh.parquet
 dataset/query.parquet
 ```
 
@@ -217,7 +217,7 @@ Chọn một chế độ trong `--prepare-only`, `--status`, `--reparse`, `--exp
 
 | Tùy chọn | Mặc định | Ý nghĩa |
 |---|---|---|
-| `--corpus` | `dataset/links_corpus.parquet` | Parquet URL/ID chính thức |
+| `--corpus` | `dataset/links_corpus_vi_en_zh.parquet` | Parquet URL/ID chính thức |
 | `--pilot` | `artifacts/host_template_audit/pages.jsonl` | **File** manifest pilot để chọn host và loại ID đã lấy mẫu |
 | `--plan` | `artifacts/crawl/plan.jsonl` | Plan dùng chung; file đã tồn tại được tái sử dụng nguyên trạng |
 | `--output` | `artifacts/crawl` | Thư mục cha của các checkpoint shard |

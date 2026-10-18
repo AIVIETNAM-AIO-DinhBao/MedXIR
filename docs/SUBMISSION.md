@@ -31,9 +31,9 @@ Thí sinh phải nộp file kết quả truy hồi ở định dạng `.json`. F
 **Trong đó:**
 
 - **id:** Mã định danh của câu hỏi, kiểu số nguyên (integer).
-- **relevant_docs:** Danh sách mã định danh của các tài liệu được dự đoán là liên quan. Trong phiên bản dữ liệu đánh giá này, sử dụng trường `id` kiểu số nguyên trong `links_corpus.parquet`.
+- **relevant_docs:** Danh sách mã định danh của các tài liệu được dự đoán là liên quan. Trong phiên bản dữ liệu đánh giá này, sử dụng trường `id` kiểu số nguyên trong `links_corpus_vi_en_zh.parquet`.
 - **relevant_chunks:** Danh sách các đoạn nội dung được dự đoán là liên quan. Mỗi đoạn cần chỉ rõ tài liệu nguồn qua `doc_id` và nội dung của đoạn qua `chunk_text`.
-- **doc_id:** Mã định danh của tài liệu gốc chứa đoạn nội dung, là trường `id` kiểu số nguyên tương ứng trong `links_corpus.parquet`.
+- **doc_id:** Mã định danh của tài liệu gốc chứa đoạn nội dung, là trường `id` kiểu số nguyên tương ứng trong `links_corpus_vi_en_zh.parquet`.
 - **chunk_text:** Nội dung của đoạn văn bản được hệ thống truy hồi từ tài liệu tương ứng với `doc_id`. `chunk_text` phải là nội dung được trích xuất từ tài liệu gốc, không phải nội dung được viết lại hoặc sinh mới bởi hệ thống.
 - **chunk_order:** Trường tùy chọn. Nếu cung cấp, giá trị phải là số nguyên không âm. Nếu bỏ qua, hệ thống sử dụng vị trí của chunk trong mảng `relevant_chunks`.
 

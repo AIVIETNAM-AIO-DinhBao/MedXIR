@@ -16,7 +16,7 @@ Crawl → Clean bằng rule theo host/template → Bổ sung metadata
 
 Xây dựng toàn bộ pipeline trên tiếng Việt trước và xuất được bài nộp hợp lệ. Sau đó bổ sung tiếng Anh, đánh giá mức tăng chất lượng, rồi mới bổ sung tiếng Trung. Mỗi vòng giữ được một baseline hoàn chỉnh để đối chiếu và quay lại khi thử nghiệm mới chưa tốt hơn.
 
-Trong tài liệu này, “Qwen 4B” được hiểu là **Qwen3-Embedding-4B** cho nhánh dense retrieval. Đây là cấu hình dự kiến cần benchmark; model reranker là một lựa chọn riêng, chưa chốt. Model nhỏ dùng gắn ICD-10 cũng được chọn riêng theo chi phí và chất lượng.
+Trong tài liệu này, “Qwen 4B” được hiểu là **Qwen3-Embedding-4B** cho nhánh dense retrieval. Quyết định ngày 17/10/2026: embed toàn bộ corpus (không chỉ ứng viên BM25); chạy pilot để so Qwen3-Embedding-4B với Qwen3-Embedding-0.6B và model khác trước khi chốt; giữ số chiều vector 2560. Model reranker là lựa chọn riêng, chưa chốt. Model nhỏ dùng gắn ICD-10 cũng được chọn riêng theo chi phí và chất lượng.
 
 ## 2. Corpus mới và phạm vi từng vòng
 
@@ -24,14 +24,16 @@ Theo thông báo cập nhật của BTC ngày 12/10/2026, corpus mới gồm:
 
 | Ngôn ngữ | Số URL | Thứ tự xử lý |
 | --- | ---: | --- |
-| Tiếng Việt | 714.469 | Vòng 1 |
+| Tiếng Việt | 740.598 | Vòng 1 |
 | Tiếng Anh | 240.000 | Vòng 2 |
 | Tiếng Trung | 240.000 | Vòng 3 |
-| **Tổng** | **1.194.469** | |
+| **Tổng** | **1.220.598** | |
 
-Nguồn: [AIGuruTinix/ViBioMIR](https://huggingface.co/datasets/AIGuruTinix/ViBioMIR), file `links_corpus_vi_en_zh.parquet`, được lưu cục bộ tại `dataset/links_corpus.parquet`.
+Số liệu trên lấy từ file hiện hành (phân nhóm theo nguồn, chưa phải nhận diện ngôn ngữ từng bài). Thông báo ngày 12/10 ghi 1.194.469 URL; file nhiều hơn 26.129 dòng, xem [AUDIT_2026-10-15.md](docs/AUDIT_2026-10-15.md).
 
-File cục bộ mới đã được kiểm tra đủ 1.194.469 dòng, không trùng ID và có hai cột `id`, `url`. Phiên bản dataset được tải tại revision `9abdb40438c29498ea32068116a12eb78051ec4d`; SHA-256 Parquet là `9e34cb4b7d6424b80ed2634ada581ea9e2d97da69c245d80bdbb31413a78e8ce`.
+Nguồn: [AIGuruTinix/ViBioMIR](https://huggingface.co/datasets/AIGuruTinix/ViBioMIR), file `links_corpus_vi_en_zh.parquet`, được lưu cục bộ tại `dataset/links_corpus_vi_en_zh.parquet`.
+
+File cục bộ đã được kiểm tra: 1.220.598 dòng, 1.220.598 ID duy nhất, 94 host, có hai cột `id`, `url`. SHA-256 là `87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7` (theo [RECRAWL_RUNBOOK.md](docs/RECRAWL_RUNBOOK.md)).
 
 Nhóm quyết định crawl lại toàn bộ corpus mới. ID chính thức phải được giữ nguyên; không đánh số lại theo dòng, shard hoặc ngôn ngữ. Plan mới không dùng checkpoint hay danh sách loại trừ của lần crawl trước.
 
@@ -51,7 +53,7 @@ Không chờ xử lý cả ba ngôn ngữ mới tạo bài nộp đầu tiên. K
 
 Lưu HTML hoặc response gốc để sửa rule clean mà không phải tải lại. Mỗi URL cần có ID, URL gốc, URL sau redirect, thời điểm tải, mã HTTP, trạng thái và lỗi. Crawl cần checkpoint, resume và cơ chế tránh gọi lại URL đã hoàn thành trong lần crawl mới.
 
-Dữ liệu trên Drive dự kiến tổ chức dưới ba thư mục `vi/`, `en/`, `zh/`. Bên trong mỗi ngôn ngữ phân biệt dữ liệu nguồn, văn bản clean và artifact phục vụ retrieval; lưu theo shard/batch để xử lý tiếp từng phần.
+Dữ liệu trên Drive dự kiến tổ chức dưới ba thư mục `vi/`, `en/`, `zh/`. Sau khi crawl xong cả hai shard, dữ liệu được upload lên Kaggle dataset (một hoặc hai dataset) để notebook dùng. Bên trong mỗi ngôn ngữ phân biệt dữ liệu nguồn, văn bản clean và artifact phục vụ retrieval; lưu theo shard/batch để xử lý tiếp từng phần.
 
 **Trạng thái hiện tại:** ba thư mục ngôn ngữ đã được tạo; crawler gốc chưa được cấu hình để upload theo cấu trúc này. Phần chia crawl giữa các máy phải bảo đảm mỗi ID chỉ có một máy phụ trách.
 
@@ -134,7 +136,7 @@ Chunk nộp lấy từ nguồn, không lấy từ phần mô tả ICD-10, bản 
 
 **BM25:** lập index từ văn bản clean/chunk, dùng tokenization phù hợp từng ngôn ngữ. Khi thêm tiếng Anh hoặc tiếng Trung, đo riêng BM25 với query tiếng Việt gốc và với bản dịch query; nhánh lexical cần có từ ngữ phù hợp mới match được tốt.
 
-**Dense retrieval:** dự kiến dùng [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), model embedding đa ngôn ngữ, để encode chunk và query. Pin model revision, cấu hình instruction, độ dài đầu vào, số chiều và chuẩn hóa vector. Benchmark tốc độ, VRAM và chất lượng trên mẫu trước khi chạy toàn phần corpus của vòng hiện tại.
+**Dense retrieval:** dự kiến dùng [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), model embedding đa ngôn ngữ, để encode chunk và query. Mọi tác vụ nặng (embedding, retrieval) chạy trên Kaggle GPU (T4 hoặc RTX Pro 6000). Notebook Kaggle chạy offline, nên model được tải về và đóng gói thành Kaggle dataset rồi load từ đường dẫn cục bộ. Vector lưu bằng FAISS index, kèm mảng ID dạng `.npy`. Pin model revision, cấu hình instruction, độ dài đầu vào, số chiều và chuẩn hóa vector. Benchmark tốc độ, VRAM và chất lượng trên mẫu trước khi chạy toàn phần corpus của vòng hiện tại.
 
 Hợp nhất thứ hạng bằng RRF là cấu hình xuất phát. Chốt số ứng viên, trọng số và ngưỡng chọn bằng thực nghiệm. Khi một nhánh có nhiều bản dịch query, kiểm soát tổng trọng số của nhánh đó.
 
@@ -184,7 +186,7 @@ Nếu phiên bản mở rộng chưa tốt hơn, giữ bài nộp baseline tốt
 
 ## 9. Artifact và bài nộp
 
-Mỗi vòng lưu manifest ID, dữ liệu clean, chunk, embedding/index, kết quả retrieval và cấu hình. Cache theo hash nội dung, phiên bản clean/chunk và model revision; tiếp tục từng shard sau gián đoạn.
+Mỗi vòng lưu manifest ID, dữ liệu clean, chunk, embedding/index, kết quả retrieval và cấu hình. Index dense là file FAISS (`.faiss`) cùng mảng ID chunk và document (`.npy`); cả hai nằm trong Kaggle dataset. Cache theo hash nội dung, phiên bản clean/chunk và model revision; tiếp tục từng shard sau gián đoạn.
 
 Tên bài nộp dự kiến:
 

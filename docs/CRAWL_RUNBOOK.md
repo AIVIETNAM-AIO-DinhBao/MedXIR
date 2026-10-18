@@ -6,7 +6,7 @@ Runbook cho hai máy dùng chung Google Drive, cùng một plan và parser. Ch�
 
 ## Phạm vi và nguyên tắc
 
-- `doc_id` là ID gốc trong `dataset/links_corpus.parquet`; phân shard theo `doc_id % 2`.
+- `doc_id` là ID gốc trong `dataset/links_corpus_vi_en_zh.parquet`; phân shard theo `doc_id % 2`.
 - Plan full hiện tại có **4.381.984 URL**. Nó loại **12.734 ID đã được thử/hoàn tất trong các đợt trước**. Một ID đã thử không có nghĩa là đã lấy được bài. Khi đánh giá độ phủ cuối cùng, phải đối chiếu cả pilot, 10.000 mẫu, 1.000 mẫu kiểm chứng, 40 URL mở lại và hai shard full theo `doc_id`.
 - Crawler ghi nhận lỗi và cảnh báo riêng. Challenge, 404, redirect về trang chủ, body rỗng, lỗi parser, template chưa biết và kết quả thiếu text đều không được tính là nội dung thành công.
 - Hai máy chạy độc lập, không có bộ điều phối tốc độ trung tâm. Cấu hình dưới đây giới hạn 1 request đồng thời mỗi nhóm nguồn trên mỗi máy; các website vẫn có thể chặn hoặc CAPTCHA.
