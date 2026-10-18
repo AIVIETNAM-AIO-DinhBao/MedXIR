@@ -613,7 +613,7 @@ def main():
     signal.signal(signal.SIGINT, signal.default_int_handler)
     signal.signal(signal.SIGTERM, signal.default_int_handler)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--corpus', type=Path, default=Path('dataset/links_corpus.parquet'))
+    parser.add_argument('--corpus', type=Path, default=Path('dataset/links_corpus_vi_en_zh.parquet'))
     parser.add_argument('--pilot', type=Path, default=Path('artifacts/host_template_audit/pages.jsonl'))
     parser.add_argument('--plan', type=Path, default=Path('artifacts/crawl/plan.jsonl'))
     parser.add_argument('--output', type=Path, default=Path('artifacts/crawl'))
@@ -720,12 +720,12 @@ def main():
             paused = {}
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts','{}')")
             db.commit()
-        if unknown := [h for h in args.retry_host if h not in paused]:
-            db.close()
-            parser.error(f'Not paused: {", ".join(unknown)}; paused hosts: {", ".join(sorted(paused))}')
         if args.retry_host:
             for host in args.retry_host:
-                print(f'Retrying paused host {host}: {paused.pop(host)}', flush=True)
+                if host in paused:
+                    print(f'Retrying paused host {host}: {paused.pop(host)}', flush=True)
+                else:
+                    print(f'--retry-host {host}: not paused, nothing to do', flush=True)
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('paused_hosts',?)", [json.dumps(paused)])
             db.commit()
         started = time.monotonic()

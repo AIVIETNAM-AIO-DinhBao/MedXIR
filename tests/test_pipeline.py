@@ -474,10 +474,10 @@ class PipelineChecks(unittest.TestCase):
                 side_effect=lambda root, storage=None: followup.write_report(root)):
             with patch.object(sys, 'argv', argv + ['--retry-host', 'a.vn']), self.assertRaises(SystemExit):
                 crawl.main()  # Exit 2: the job is still pending in this fake run.
-            with patch.object(sys, 'argv', argv + ['--retry-host', 'c.vn']), self.assertRaises(SystemExit), \
-                    patch('sys.stderr'):
+            # Reusing the command after a host was already unpaused is harmless.
+            with patch.object(sys, 'argv', argv + ['--retry-host', 'a.vn']), self.assertRaises(SystemExit):
                 crawl.main()
-        self.assertEqual(seen, [{'b.vn': dict(reason='deferred:blocked')}])
+        self.assertEqual(seen, [{'b.vn': dict(reason='deferred:blocked')}] * 2)
         with sqlite3.connect(root / 'state.sqlite') as db:
             saved = json.loads(db.execute("SELECT value FROM metadata WHERE key='paused_hosts'").fetchone()[0])
         self.assertEqual(saved, {'b.vn': dict(reason='deferred:blocked')})
