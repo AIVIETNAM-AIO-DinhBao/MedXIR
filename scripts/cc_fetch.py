@@ -64,8 +64,12 @@ def pick_pointers(paths, docs):
     rows = []
     for path in paths:
         rows += [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
-    for row in sorted(rows, key=lambda r: r['crawl'], reverse=True):
-        if row['status'] != 200 or 'html' not in (row.get('mime') or ''):
+    # Newest crawl first, text/html before 'unk' (MIME not recorded; used only when no html capture exists).
+    rows.sort(key=lambda r: r['crawl'], reverse=True)
+    rows.sort(key=lambda r: (r.get('mime') or '') == 'unk')
+    for row in rows:
+        mime = row.get('mime') or ''
+        if row['status'] != 200 or ('html' not in mime and mime != 'unk'):
             continue
         doc = by_url.get(normalize(row['url']))
         if doc and doc['doc_id'] not in chosen:
