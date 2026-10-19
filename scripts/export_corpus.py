@@ -39,16 +39,19 @@ def checkpoints(root, lang):
         yield root / lang / 'europepmc/state.sqlite', 'items'
 
 
-def cc_documents(root, lang):
-    """Pages recovered from Common Crawl (scripts/cc_fetch.py); their doc_ids are pending locally."""
-    path = root / 'cc_v1' / 'documents.jsonl.gz'
-    if not path.is_file():
-        return
-    with gzip.open(path, 'rt', encoding='utf-8') as source:
-        for line in source:
-            document = json.loads(line)
-            if document.get('lang') == lang:
-                yield document
+def recovered_documents(root, lang):
+    """Pages recovered from Common Crawl (cc_v1, scripts/cc_fetch.py), the Internet
+    Archive (wayback_v1, scripts/wayback_fetch.py) and the announced Pharmacity address
+    (pharmacity_v1, scripts/pharmacity_fetch.py); their doc_ids are pending locally."""
+    for name in ('cc_v1', 'wayback_v1', 'pharmacity_v1'):
+        path = root / name / 'documents.jsonl.gz'
+        if not path.is_file():
+            continue
+        with gzip.open(path, 'rt', encoding='utf-8') as source:
+            for line in source:
+                document = json.loads(line)
+                if document.get('lang') == lang:
+                    yield document
 
 
 def document_text(document):
@@ -137,17 +140,17 @@ def export(root, lang, output, min_chars, scratch):
                     if len(buffer['doc_id']) >= 5000:
                         flush()
             db.close()
-        for document in cc_documents(root, lang):
+        for document in recovered_documents(root, lang):
             # Same accept/skip rules as local pages; duplicates are dropped by doc_id.
             status, text = document.get('status') or '', document_text(document)
             if document['doc_id'] in seen:
                 stats['duplicate'] += 1
             elif status in SKIP_STATUS or len(text) < min_chars:
-                stats[f'cc_skipped:{status or "none"}'] += 1
+                stats[f'recovered_skipped:{status or "none"}'] += 1
             else:
                 seen.add(document['doc_id'])
                 stats['exported'] += 1
-                stats['cc_exported'] += 1
+                stats['recovered_exported'] += 1
                 stats['chars'] += len(text)
                 for name, value in zip(SCHEMA.names, (
                         document['doc_id'], lang, document.get('url') or '',
