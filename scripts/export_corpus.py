@@ -35,6 +35,10 @@ SKIP_STATUS = {'homepage', 'redirected_home', 'non_html', 'http_error', 'fetch_e
 def checkpoints(root, lang):
     for path in sorted((root / lang).glob('shard-*/state.sqlite')):
         yield path, 'jobs'
+    # Retry runs (scripts/retry_plan.py) come after the shards: a failed original page
+    # is skipped, so the retried page of the same doc_id is the one exported.
+    for path in sorted((root / lang).glob('retry_*/shard-*/state.sqlite')):
+        yield path, 'jobs'
     if (root / lang / 'europepmc/state.sqlite').is_file():
         yield root / lang / 'europepmc/state.sqlite', 'items'
 

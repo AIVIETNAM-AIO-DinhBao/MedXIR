@@ -27,6 +27,9 @@ PREFIXES = {
     'laodong.vn': 'vn,laodong)/',
     'nhathuoclongchau.com.vn': 'vn,com,nhathuoclongchau)/',
     'pmc-ecm-healthblog.beta.pharmacity.io': 'io,pharmacity,beta,pmc-ecm-healthblog)/',
+    # Live site now redirects most articles home or to a login wall.
+    'thaythuocvietnam.vn': 'vn,thaythuocvietnam)/',
+    'www.vinmec.com': 'com,vinmec)/',
 }
 ARCHIVE = 'https://data.commoncrawl.org/'
 

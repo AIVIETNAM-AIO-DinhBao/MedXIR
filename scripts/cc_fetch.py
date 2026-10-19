@@ -37,6 +37,16 @@ def normalize(url):
     return url.rstrip('/').lower().replace('https://', '').replace('http://', '').replace('www.', '')
 
 
+def plan_docs(path):
+    """Docs from a retry_plan.py archive plan (pages that redirected on the live site)."""
+    docs = {}
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if line.strip():
+            row = json.loads(line)
+            docs[row['doc_id']] = dict(doc_id=row['doc_id'], url=row['url'], host=row['host'], lang=row['language'])
+    return docs
+
+
 def pending_docs():
     docs = {}
     for lang, path in PENDING.items():
@@ -104,6 +114,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--limit', type=int, default=0, help='0 = all (for test runs)')
+    parser.add_argument('--plan', type=Path, help='Recover these docs instead of the pending ones')
     args = parser.parse_args()
 
     (args.output / 'raw').mkdir(parents=True, exist_ok=True)
@@ -112,7 +123,7 @@ def main():
     if done_path.exists():
         with gzip.open(done_path, 'rt', encoding='utf-8') as f:
             done = {json.loads(line)['doc_id'] for line in f}
-    docs = pick_pointers(args.pointers, pending_docs())
+    docs = pick_pointers(args.pointers, plan_docs(args.plan) if args.plan else pending_docs())
     todo = [d for doc_id, d in sorted(docs.items()) if doc_id not in done]
     if args.limit:
         todo = todo[:args.limit]
