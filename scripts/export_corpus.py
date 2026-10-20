@@ -10,6 +10,7 @@ Checkpoints are opened read-only, so a running crawl is not disturbed.
 """
 import argparse
 import gzip
+import itertools
 import json
 import sqlite3
 import tempfile
@@ -56,6 +57,25 @@ def recovered_documents(root, lang):
                 document = json.loads(line)
                 if document.get('lang') == lang:
                     yield document
+
+
+def remote_batch_documents(remote, scratch):
+    """Documents of a shard that ran on another machine: batches in cloud storage.
+
+    <remote> is the batches folder (e.g. gdrive:MedXIR/vi/runs/<plan>/shard-001-of-002/batches).
+    Each batch's documents.jsonl.gz is checked against its manifest before reading.
+    """
+    for entry in command('lsf', '--dirs-only', remote).decode().split():
+        batch = f"{remote.rstrip('/')}/{entry.rstrip('/')}"
+        manifest = json.loads(command('cat', f'{batch}/manifest.json'))
+        target = scratch / f'{entry.rstrip("/")}.jsonl.gz'
+        command('copyto', f'{batch}/documents.jsonl.gz', target)
+        if sha256(target) != manifest['files']['documents.jsonl.gz']['sha256']:
+            raise ValueError(f'Corrupted remote document batch: {batch}')
+        with gzip.open(target, 'rt', encoding='utf-8') as source:
+            for line in source:
+                yield json.loads(line)
+        target.unlink()
 
 
 def document_text(document):
@@ -111,7 +131,7 @@ def archived_documents(db, config, scratch):
             path.unlink()
 
 
-def export(root, lang, output, min_chars, scratch):
+def export(root, lang, output, min_chars, scratch, remote=None):
     config_path = root / f'storage.{lang}.json'
     config = json.loads(config_path.read_text()) if config_path.is_file() else None
     seen, stats, buffer = set(), Counter(), {name: [] for name in SCHEMA.names}
@@ -147,7 +167,10 @@ def export(root, lang, output, min_chars, scratch):
                     if len(buffer['doc_id']) >= 5000:
                         flush()
             db.close()
-        for document in recovered_documents(root, lang):
+        recovered = recovered_documents(root, lang)
+        if remote:
+            recovered = itertools.chain(recovered, remote_batch_documents(remote, scratch))
+        for document in recovered:
             # Same accept/skip rules as local pages; duplicates are dropped by doc_id.
             status, text = document.get('status') or '', document_text(document)
             if document['doc_id'] in seen:
@@ -176,13 +199,16 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('artifacts/corpus_v1'))
     parser.add_argument('--langs', nargs='+', choices=['vi', 'en', 'zh'], required=True)
     parser.add_argument('--min-chars', type=int, default=30)
+    parser.add_argument('--remote', action='append', default=[], metavar='LANG=BATCHES',
+                        help='Batches folder of a shard run elsewhere, e.g. vi=gdrive:MedXIR/vi/runs/<plan>/shard-001-of-002/batches')
     args = parser.parse_args()
+    remotes = dict(item.split('=', 1) for item in args.remote)
     args.output.mkdir(parents=True, exist_ok=True)
     for lang in args.langs:
         target = args.output / f'{lang}.parquet'
         temporary = target.with_suffix('.parquet.tmp')
         with tempfile.TemporaryDirectory(prefix='medxir-export-') as scratch:
-            stats = export(args.root, lang, temporary, args.min_chars, Path(scratch))
+            stats = export(args.root, lang, temporary, args.min_chars, Path(scratch), remotes.get(lang))
         temporary.replace(target)
         print(f'{target}: {stats["exported"]:,} documents, {stats["chars"]:,} chars')
         for key in sorted(k for k in stats if k not in ('exported', 'chars')):
