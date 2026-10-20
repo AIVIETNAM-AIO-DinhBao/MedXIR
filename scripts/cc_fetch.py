@@ -97,8 +97,13 @@ def fetch(client, doc, output):
             body = gzip.decompress(raw_path.read_bytes())
             headers = {}
         else:
-            response = client.get(ARCHIVE + pointer['warc'], headers={
-                'Range': f"bytes={pointer['offset']}-{pointer['offset'] + pointer['length'] - 1}"})
+            # CloudFront answers 403 to bursts of range requests; back off and retry instead of failing.
+            for attempt in range(6):
+                response = client.get(ARCHIVE + pointer['warc'], headers={
+                    'Range': f"bytes={pointer['offset']}-{pointer['offset'] + pointer['length'] - 1}"})
+                if response.status_code not in (403, 429, 503):
+                    break
+                time.sleep(min(600, 30 * 2 ** attempt))
             if response.status_code != 206:
                 return dict(doc_id=doc['doc_id'], ok=False, error=f'http {response.status_code}')
             headers, body = unwrap(response.content)
