@@ -76,6 +76,9 @@ def local_documents(db, table):
 
 def archived_documents(db, config, scratch):
     """Current documents whose full text lives only in cloud batches."""
+    # Retry checkpoints are created without the archive column; they never archive.
+    if 'archive' not in {row[1] for row in db.execute('PRAGMA table_info(jobs)')}:
+        return
     current = {}
     for doc_id, batch_id in db.execute(
             "SELECT doc_id,archive FROM jobs WHERE archive IS NOT NULL "
