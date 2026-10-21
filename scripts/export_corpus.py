@@ -26,8 +26,10 @@ from storage import command, destination_root, sha256
 SCHEMA = pa.schema([
     ('doc_id', pa.int64()), ('lang', pa.string()), ('url', pa.string()), ('host', pa.string()),
     ('title', pa.string()), ('status', pa.string()), ('parser_version', pa.string()),
-    ('text', pa.string()),
+    ('source', pa.string()), ('text', pa.string()),
 ])
+# Where a document came from: the live crawl, Europe PMC, or a recovery store.
+RECOVERY_SOURCES = {'cc_v1': 'cc', 'wayback_v1': 'wayback', 'pharmacity_v1': 'pharmacity'}
 # Pages that parsed but are not articles; never worth indexing.
 SKIP_STATUS = {'homepage', 'redirected_home', 'non_html', 'http_error', 'fetch_error',
                'source_error', 'empty_content', 'empty_response', 'unknown_template', 'not_found'}
@@ -48,7 +50,7 @@ def recovered_documents(root, lang):
     """Pages recovered from Common Crawl (cc_v1, scripts/cc_fetch.py), the Internet
     Archive (wayback_v1, scripts/wayback_fetch.py) and the announced Pharmacity address
     (pharmacity_v1, scripts/pharmacity_fetch.py); their doc_ids are pending locally."""
-    for name in ('cc_v1', 'wayback_v1', 'pharmacity_v1'):
+    for name, source_name in RECOVERY_SOURCES.items():
         path = root / name / 'documents.jsonl.gz'
         if not path.is_file():
             continue
@@ -56,7 +58,7 @@ def recovered_documents(root, lang):
             for line in source:
                 document = json.loads(line)
                 if document.get('lang') == lang:
-                    yield document
+                    yield source_name, document
 
 
 def remote_batch_documents(remote, scratch):
@@ -149,6 +151,7 @@ def export(root, lang, output, min_chars, scratch, remote=None):
             if table == 'jobs':
                 documents = (d for source in (documents, archived_documents(db, config, scratch))
                              for d in source)
+            source_name = 'europepmc' if table == 'items' else 'crawl'
             for document in documents:
                 status, text = document.get('status') or '', document_text(document)
                 if document['doc_id'] in seen:
@@ -158,34 +161,37 @@ def export(root, lang, output, min_chars, scratch, remote=None):
                 else:
                     seen.add(document['doc_id'])
                     stats['exported'] += 1
+                    stats[f'source:{source_name}'] += 1
                     stats['chars'] += len(text)
                     for name, value in zip(SCHEMA.names, (
                             document['doc_id'], lang, document.get('url') or '',
                             document.get('host') or '', document.get('title') or '', status,
-                            document.get('parser_version') or '', text)):
+                            document.get('parser_version') or '', source_name, text)):
                         buffer[name].append(value)
                     if len(buffer['doc_id']) >= 5000:
                         flush()
             db.close()
+        # Another machine's crawl shard before the recovery stores: a live page wins over an archived copy.
         recovered = recovered_documents(root, lang)
         if remote:
-            recovered = itertools.chain(recovered, remote_batch_documents(remote, scratch))
-        for document in recovered:
+            remote_pages = (('crawl', document) for document in remote_batch_documents(remote, scratch))
+            recovered = itertools.chain(remote_pages, recovered)
+        for source_name, document in recovered:
             # Same accept/skip rules as local pages; duplicates are dropped by doc_id.
             status, text = document.get('status') or '', document_text(document)
             if document['doc_id'] in seen:
                 stats['duplicate'] += 1
             elif status in SKIP_STATUS or len(text) < min_chars:
-                stats[f'recovered_skipped:{status or "none"}'] += 1
+                stats[f'skipped:{source_name}:{status or "none"}'] += 1
             else:
                 seen.add(document['doc_id'])
                 stats['exported'] += 1
-                stats['recovered_exported'] += 1
+                stats[f'source:{source_name}'] += 1
                 stats['chars'] += len(text)
                 for name, value in zip(SCHEMA.names, (
                         document['doc_id'], lang, document.get('url') or '',
                         document.get('host') or '', document.get('title') or '', status,
-                        document.get('parser_version') or '', text)):
+                        document.get('parser_version') or '', source_name, text)):
                     buffer[name].append(value)
                 if len(buffer['doc_id']) >= 5000:
                     flush()
