@@ -39,6 +39,7 @@ uv run python -m tools.kaggle kernel fetch boinhbo/<slug> --destination <dir> --
 | `configs/kaggle/embed_benchmark_t4.yaml` | `boinhbo/medxir-embed-benchmark-t4` | T4 ×2, Internet ON | `embed_benchmark.json/.csv` |
 | `configs/kaggle/package_models.yaml` | `boinhbo/medxir-package-models` | CPU, Internet ON | `models/<name>/`, `models/MODELS.json` |
 | `configs/kaggle/embed_benchmark_rtx6000.yaml` | `boinhbo/medxir-embed-benchmark-rtx6000` | RTX Pro 6000 (chọn trong UI), Internet OFF | `embed_benchmark.json/.csv`. Cần chạy `package_models` trước |
+| `configs/kaggle/embed_corpus_06b_rtx6000.yaml` | `boinhbo/medxir-embed-corpus-06b` | RTX Pro 6000 (chọn trong UI), Internet OFF | `vectors/*.npy` (float16, 1024 chiều), `embed_manifest.json`. Cần `chunk_corpus` và `package_models` |
 
 ## Quy tắc chung của dự án
 
