@@ -240,7 +240,7 @@ pd.DataFrame(SUMMARY).T
 def notebook(cells):
     out = []
     for index, (kind, text) in enumerate(cells):
-        cell = dict(cell_type=kind, id=f'cell-{index:02d}', metadata={}, source=markdown(text).splitlines(keepends=True))
+        cell = dict(cell_type='markdown' if kind == 'md' else kind, id=f'cell-{index:02d}', metadata={}, source=markdown(text).splitlines(keepends=True))
         if kind == 'code':
             cell.update(execution_count=None, outputs=[], source=text.strip('\n').splitlines(keepends=True))
         out.append(cell)
