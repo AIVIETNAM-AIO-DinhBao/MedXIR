@@ -1,0 +1,14 @@
+# CPU job: chunk every unique text of medxir-corpus (docs/CHUNKING_RUN.md).
+# Downstream jobs attach its output with kernel_sources: [boinhbo/medxir-chunk-corpus].
+kernel:
+  id: boinhbo/medxir-chunk-corpus
+  title: medxir chunk corpus
+  code_file: src/notebooks/kaggle_chunk_corpus.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  dataset_sources: [boinhbo/medxir-corpus]
+  timeout_seconds: 14400
+  poll_interval_seconds: 120
+  fetch_files: [chunk_manifest.json]
+  required_outputs: [chunk_manifest.json]

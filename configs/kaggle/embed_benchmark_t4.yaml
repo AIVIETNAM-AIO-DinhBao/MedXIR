@@ -1,0 +1,14 @@
+# GPU T4 x2, Internet ON: models come from Hugging Face (docs/EMBEDDING_BENCHMARK.md).
+kernel:
+  id: boinhbo/medxir-embed-benchmark-t4
+  title: medxir embed benchmark t4
+  code_file: src/notebooks/kaggle_embed_benchmark.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: true
+  machine_shape: NvidiaTeslaT4
+  dataset_sources: [boinhbo/medxir-corpus]
+  timeout_seconds: 7200
+  poll_interval_seconds: 60
+  fetch_files: [embed_benchmark.json, embed_benchmark.csv]
+  required_outputs: [embed_benchmark.json]

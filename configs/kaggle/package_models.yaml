@@ -1,0 +1,13 @@
+# CPU, Internet ON: snapshot Qwen3-Embedding 0.6B and 4B at pinned revisions.
+# Offline (RTX Pro 6000) jobs attach the output with kernel_sources: [boinhbo/medxir-package-models].
+kernel:
+  id: boinhbo/medxir-package-models
+  title: medxir package models
+  code_file: src/notebooks/kaggle_package_models.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  timeout_seconds: 5400
+  poll_interval_seconds: 60
+  fetch_files: [models/MODELS.json]
+  required_outputs: [models/MODELS.json]
