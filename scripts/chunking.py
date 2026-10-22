@@ -118,14 +118,32 @@ def chunk_document(text, lang, limit=350, minimum=40, overlap=50):
     return chunks
 
 
-def stats(path, limits, sample):
+def sample_rows(path, sample):
+    """(lang, text) of a random sample, read one row group at a time: take() on the whole
+    text column overflows the 2 GB string offsets of the 1 GB vi corpus."""
     import numpy as np
     import pyarrow.parquet as pq
 
-    table = pq.read_table(path, columns=['lang', 'text'])
-    if sample and table.num_rows > sample:
-        table = table.take(np.random.default_rng(0).choice(table.num_rows, sample, replace=False))
-    langs, texts = table.column('lang').to_pylist(), table.column('text').to_pylist()
+    file = pq.ParquetFile(path)
+    total = file.metadata.num_rows
+    wanted = None
+    if sample and total > sample:
+        wanted = set(np.random.default_rng(0).choice(total, sample, replace=False).tolist())
+    rows, offset = [], 0
+    for group in range(file.metadata.num_row_groups):
+        count = file.metadata.row_group(group).num_rows
+        columns = file.read_row_group(group, columns=['lang', 'text']).to_pydict()
+        rows += [(columns['lang'][i], columns['text'][i]) for i in range(count)
+                 if wanted is None or offset + i in wanted]
+        offset += count
+    return rows
+
+
+def stats(path, limits, sample):
+    import numpy as np
+
+    rows = sample_rows(path, sample)
+    langs, texts = [lang for lang, _ in rows], [text for _, text in rows]
     lengths = np.array([size(t, l) for t, l in zip(texts, langs)])
     unit = 'chars/2' if langs and langs[0] == 'zh' else 'words'
     print(f'{path}: {len(texts):,} documents sampled, length in {unit}')
@@ -137,7 +155,7 @@ def stats(path, limits, sample):
             counts.append(len(chunks))
             chunk_sizes.extend(size(c.text, lang) for c in chunks)
             assert all(text[c.start:c.end] == c.text for c in chunks)
-        scale = table.num_rows if not sample else None
+        scale = len(texts) if not sample else None
         print(f'  limit {limit:>4}: chunks/doc mean {np.mean(counts):.2f}, '
               f'chunk size p50/p90 {int(np.percentile(chunk_sizes, 50))}/{int(np.percentile(chunk_sizes, 90))}, '
               f'single-chunk docs {np.mean(np.array(counts) == 1):.0%}'
