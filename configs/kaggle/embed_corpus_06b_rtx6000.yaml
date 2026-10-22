@@ -1,5 +1,5 @@
 # RTX Pro 6000, Internet OFF: Qwen3-Embedding-0.6B over all chunks of medxir-corpus.
-# The CLI 2.2.4 has no RTX Pro 6000 machine_shape: pick the accelerator in the Kaggle UI.
+# machine_shape NvidiaRtxPro6000 is the RTX Pro 6000 value (read from the kernel saved in the UI).
 # The notebook stops at once on any other GPU (EXPECT_GPU = '6000').
 kernel:
   id: boinhbo/medxir-embed-corpus-06b
@@ -8,6 +8,7 @@ kernel:
   kernel_type: notebook
   enable_gpu: true
   enable_internet: false
+  machine_shape: NvidiaRtxPro6000
   kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
   timeout_seconds: 28800
   poll_interval_seconds: 300

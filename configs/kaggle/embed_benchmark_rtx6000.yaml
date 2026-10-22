@@ -1,6 +1,5 @@
 # RTX Pro 6000, Internet OFF: models come from the offline package kernel (docs/EMBEDDING_BENCHMARK.md, part C).
-# The CLI 2.2.4 has no RTX Pro 6000 machine_shape. Select the accelerator in the Kaggle UI for this kernel,
-# or the run fails at the hardware check below (it never reports a T4 result as RTX).
+# machine_shape NvidiaRtxPro6000 is the RTX Pro 6000 value. The hardware check below fails the run on any other GPU.
 kernel:
   id: boinhbo/medxir-embed-benchmark-rtx6000
   title: medxir embed benchmark rtx6000
@@ -8,6 +7,7 @@ kernel:
   kernel_type: notebook
   enable_gpu: true
   enable_internet: false
+  machine_shape: NvidiaRtxPro6000
   dataset_sources: [boinhbo/medxir-corpus]
   kernel_sources: [boinhbo/medxir-package-models]
   timeout_seconds: 7200
