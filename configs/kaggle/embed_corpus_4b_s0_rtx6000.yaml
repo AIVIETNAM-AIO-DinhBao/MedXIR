@@ -8,6 +8,7 @@ kernel:
   enable_gpu: true
   enable_internet: false
   machine_shape: NvidiaRtxPro6000
+  competition_sources: [arc-prize-2026-arc-agi-3]
   kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
   timeout_seconds: 21600
   poll_interval_seconds: 300
