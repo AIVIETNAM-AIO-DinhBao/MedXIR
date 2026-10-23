@@ -1,0 +1,12 @@
+kernel:
+  id: boinhbo/medxir-index-mount-smoke
+  title: medxir index mount smoke
+  code_file: src/notebooks/kaggle_index_mount_smoke.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  dataset_sources: [boinhbo/medxir-faiss-qwen3-4b-fp32]
+  timeout_seconds: 1200
+  poll_interval_seconds: 60
+  fetch_files: [index_mount.json]
+  required_outputs: [index_mount.json]

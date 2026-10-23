@@ -1,0 +1,17 @@
+kernel:
+  id: boinhbo/medxir-retrieval-input-smoke
+  title: medxir retrieval input smoke
+  code_file: src/notebooks/kaggle_gpu_smoke.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
+  dataset_sources:
+    - boinhbo/medxir-faiss-qwen3-4b-fp32
+    - boinhbo/medxir-retrieval-inputs
+  timeout_seconds: 21600
+  poll_interval_seconds: 60
+  required_outputs: []

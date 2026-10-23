@@ -11,6 +11,11 @@ dependencies = [
     "pyarrow>=26.0.0",
 ]
 
+[project.optional-dependencies]
+retrieval = [
+    "faiss-cpu>=1.11",
+]
+
 [tool.uv]
 package = false
 

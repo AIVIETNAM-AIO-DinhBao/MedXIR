@@ -1,0 +1,26 @@
+# Offline GPU retrieval using the already-uploaded FP32 IndexFlatIP files.
+kernel:
+  id: boinhbo/medxir-retrieve-qwen3-4b
+  title: medxir retrieve qwen3 4b
+  code_file: src/notebooks/kaggle_retrieve_qwen3_4b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
+  dataset_sources:
+    - boinhbo/medxir-faiss-qwen3-4b-fp32
+    - boinhbo/medxir-retrieval-inputs
+  timeout_seconds: 21600
+  poll_interval_seconds: 120
+  fetch_files:
+    - retrieval_manifest.json
+    - medxir-qwen3-4b-submission.json
+    - medxir-qwen3-4b-submission.zip
+  required_outputs:
+    - retrieval_manifest.json
+    - medxir-qwen3-4b-submission.json
+    - medxir-qwen3-4b-submission.zip
+  metrics_file: retrieval_manifest.json

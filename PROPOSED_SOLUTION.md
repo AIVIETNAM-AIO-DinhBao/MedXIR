@@ -16,6 +16,8 @@ Crawl → Clean bằng rule theo host/template → Bổ sung metadata
 
 Xây dựng toàn bộ pipeline trên tiếng Việt trước và xuất được bài nộp hợp lệ. Sau đó bổ sung tiếng Anh, đánh giá mức tăng chất lượng, rồi mới bổ sung tiếng Trung. Mỗi vòng giữ được một baseline hoàn chỉnh để đối chiếu và quay lại khi thử nghiệm mới chưa tốt hơn.
 
+**Ưu tiên triển khai hiện tại — 23/10/2026:** nộp dense baseline sớm bằng Qwen3-Embedding-4B trên vectors đã tạo cho đủ ba ngôn ngữ. BM25 tạm hoãn cho tới khi chốt và đánh giá tokenizer EN/VI/ZH; chưa để nhánh này chặn submission đầu tiên.
+
 Trong tài liệu này, “Qwen 4B” được hiểu là **Qwen3-Embedding-4B** cho nhánh dense retrieval. Quyết định ngày 17/10/2026: embed toàn bộ corpus (không chỉ ứng viên BM25); chạy pilot để so Qwen3-Embedding-4B với Qwen3-Embedding-0.6B và model khác trước khi chốt; giữ số chiều vector 2560. Model reranker là lựa chọn riêng, chưa chốt. Model nhỏ dùng gắn ICD-10 cũng được chọn riêng theo chi phí và chất lượng.
 
 ## 2. Corpus mới và phạm vi từng vòng
@@ -134,9 +136,9 @@ Chunk nộp lấy từ nguồn, không lấy từ phần mô tả ICD-10, bản 
 
 ### 7.2. Hai nhánh tìm kiếm
 
-**BM25:** lập index từ văn bản clean/chunk, dùng tokenization phù hợp từng ngôn ngữ. Khi thêm tiếng Anh hoặc tiếng Trung, đo riêng BM25 với query tiếng Việt gốc và với bản dịch query; nhánh lexical cần có từ ngữ phù hợp mới match được tốt.
+**BM25 — giai đoạn sau:** lập index từ văn bản clean/chunk, dùng tokenization phù hợp từng ngôn ngữ. Tạm hoãn đến khi có lựa chọn tokenizer riêng cho EN/VI/ZH và có thể đánh giá chúng; khi triển khai, đo BM25 với query tiếng Việt gốc và với bản dịch query.
 
-**Dense retrieval:** dự kiến dùng [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), model embedding đa ngôn ngữ, để encode chunk và query. Mọi tác vụ nặng (embedding, retrieval) chạy trên Kaggle GPU (T4 hoặc RTX Pro 6000). Notebook Kaggle chạy offline, nên model được tải về và đóng gói thành Kaggle dataset rồi load từ đường dẫn cục bộ. Vector lưu bằng FAISS index, kèm mảng ID dạng `.npy`. Pin model revision, cấu hình instruction, độ dài đầu vào, số chiều và chuẩn hóa vector. Benchmark tốc độ, VRAM và chất lượng trên mẫu trước khi chạy toàn phần corpus của vòng hiện tại.
+**Dense retrieval:** dùng [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), model embedding đa ngôn ngữ, cho vectors corpus và query. Full corpus đã embed; không chạy lại chunk embedding. Tạo exact FAISS `IndexFlatIP` riêng từng part để giới hạn RAM khi build, với row-map Parquet nối số hàng FAISS tới `chunk_id` và metadata chunk. Nguồn vector vẫn float16; index đầu tiên float32 và chuẩn hóa lại sau khi nạp để khử norm drift do lưu float16. Query phải dùng cùng model/config và được chuẩn hóa. Merge top-k từ từng part theo inner product. Chi tiết khóa nối ở [RETRIEVAL_DATA_CONTRACT.md](docs/RETRIEVAL_DATA_CONTRACT.md).
 
 Hợp nhất thứ hạng bằng RRF là cấu hình xuất phát. Chốt số ứng viên, trọng số và ngưỡng chọn bằng thực nghiệm. Khi một nhánh có nhiều bản dịch query, kiểm soát tổng trọng số của nhánh đó.
 
@@ -186,7 +188,7 @@ Nếu phiên bản mở rộng chưa tốt hơn, giữ bài nộp baseline tốt
 
 ## 9. Artifact và bài nộp
 
-Mỗi vòng lưu manifest ID, dữ liệu clean, chunk, embedding/index, kết quả retrieval và cấu hình. Index dense là file FAISS (`.faiss`) cùng mảng ID chunk và document (`.npy`); cả hai nằm trong Kaggle dataset. Cache theo hash nội dung, phiên bản clean/chunk và model revision; tiếp tục từng shard sau gián đoạn.
+Mỗi vòng lưu manifest ID, dữ liệu clean, chunk, embedding/index, kết quả retrieval và cấu hình. Mỗi index part là file FAISS (`.faiss`) kèm `row_map.parquet`; map này trỏ tới chunk parquet gốc bằng `chunk_id`. Giữ `hash_groups.parquet` làm bảng ánh xạ document và fan-out. Cache theo corpus/chunk version và model revision; tiếp tục từng part sau gián đoạn.
 
 Tên bài nộp dự kiến:
 
@@ -200,14 +202,13 @@ Theo [SUBMISSION.md](docs/SUBMISSION.md), mỗi JSON phải có đủ 1.200 quer
 
 ## 10. Thứ tự công việc
 
-1. Phân ngôn ngữ và phân công crawl trên corpus mới; hoàn thiện checkpoint và upload theo ngôn ngữ.
-2. Crawl VI, khảo sát template, viết rule clean và kiểm tra chất lượng theo batch.
-3. Giữ metadata tối thiểu, chunk VI, lập BM25 và thử Qwen 4B trên mẫu rồi mở rộng.
-4. Xuất bài nộp VI hoàn chỉnh; lưu cấu hình và kết quả đánh giá baseline.
-5. Thử ICD-10 bằng BM25 + embedding nhỏ; giữ khi có lợi ích hoặc dùng để phân tích corpus.
-6. Xử lý EN qua cùng pipeline, tạo VI+EN, đo đóng góp và phân tích lỗi.
-7. Xử lý ZH, tạo VI+EN+ZH, đo đóng góp và phân tích lỗi.
-8. Bổ sung metadata và các cải tiến retrieval dựa trên lỗi đã quan sát; chọn bài nộp tốt nhất đã kiểm chứng.
+1. Corpus v1 đã chunk và embed đầy đủ VI/EN/ZH bằng Qwen3-Embedding-4B.
+2. Tạo exact `IndexFlatIP` theo từng part, xác minh row-map và lưu index manifest.
+3. Encode query bằng đúng 4B, truy hồi dense trên các part, hợp nhất candidate và xuất JSON đủ 1.200 query.
+4. Kiểm tra submission theo schema, ID và nội dung chunk nguồn; lưu baseline trước khi tinh chỉnh.
+5. So sánh Qwen3-Embedding-0.6B với 4B trên cùng tập query/corpus khi baseline chạy được.
+6. Thiết kế tokenizer riêng EN/VI/ZH, sau đó mới triển khai BM25 và đánh giá hybrid.
+7. Dùng lỗi retrieval quan sát được để quyết định có cần query translation, ICD-10 hay reranker.
 
 Các cỡ batch, dimension, chunk size, top-K, model nhỏ gắn tag và thời gian embedding chưa chốt. Đo trên mẫu đại diện trước khi chạy quy mô lớn. Theo [OVERVIEW.md](OVERVIEW.md), model phải đáp ứng quy định công khai, tối đa 15B và phát hành trước 01/08/2026; lưu revision và bằng chứng ngày phát hành khi chọn checkpoint.
 

@@ -1,8 +1,8 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 15/10/2026 (UTC+07:00).
+**Cập nhật:** 23/10/2026 (UTC+07:00).
 
-**Giai đoạn hiện tại:** đã chuẩn bị lần crawl mới corpus 1.220.598 ID, parser v2.3, hai shard và ba đích Drive ngôn ngữ. Đã xác minh đợt đầu 300 VI + 300 ZH; shard 0 đã chạy dài từ 21:16 ngày 15/10/2026 (UTC+07:00), sau đó dừng nền theo yêu cầu người dùng ở 1.990 VI + 1.466 ZH; checkpoint và follow-up đã lưu. Lần tiếp theo chạy thủ công trên terminal. PubMed và các nguồn bị chặn được giữ trong hàng đợi hoãn.
+**Giai đoạn hiện tại:** corpus v1 và vectors 0.6B/4B đã hoàn tất. Đã xác minh phép nối 4B từ hàng vector qua `chunk_id` tới chunk gốc và `hash_groups`; đã build đủ chín exact FAISS `IndexFlatIP` cho Qwen3-Embedding-4B. Việc tiếp theo là embed query, chạy dense retrieval, tạo và kiểm tra submission 1.200 query. BM25 được hoãn tới khi chốt tokenizer riêng cho EN/VI/ZH.
 
 Tài liệu này ghi kết quả đã thu được. Các bước thiết kế chưa triển khai được đánh dấu riêng; hướng giải quyết tổng thể nằm trong [PROPOSED_SOLUTION.md](PROPOSED_SOLUTION.md).
 
@@ -432,7 +432,7 @@ Reprobe 14 nguồn cũ: Long Châu/Việt Đức mở lại, 12 nguồn còn l�
 
 **Kết luận:** đủ khả năng bắt đầu full crawl có kiểm soát và giữ nguồn để sửa parser sau. Chưa thể xác nhận sẽ lấy đủ nội dung 4,4 triệu URL. Cảnh báo phân trang (31 mẫu cũ), media/PDF/ảnh, QA thiếu đáp án và vùng preview/paywall còn tồn tại; không tự biến chúng thành bản hoàn chỉnh cho indexing. Theo delay 2 giây, riêng CNKang có cận dưới khoảng 22,3 ngày; đây không phải cam kết thời gian hoàn thành.
 
-## 13. Bước tiếp theo
+## 13. Kế hoạch tại thời điểm 11/10/2026
 
 1. Chạy full plan trực tiếp theo shard; theo dõi batch đầu, nguồn pause, tỷ lệ text/cảnh báo và dung lượng theo host.
 2. Xử lý host bị chặn khi có phương án truy cập thực sự; mở lại pending sau khi xác minh, tránh retry liên tục.
@@ -440,3 +440,65 @@ Reprobe 14 nguồn cũ: Long Châu/Việt Đức mở lại, 12 nguồn còn l�
 4. Hợp kết quả các đợt theo doc_id, thiết kế chunking từ block/QA và triển khai sparse + dense baseline.
 
 **Chưa hoàn thành:** crawl toàn bộ, chunking, indexing, retrieval, reranking, benchmark và bài nộp.
+
+## 14. Chunking, embedding và đóng gói vector — 23/10/2026
+
+### Chunking corpus trên Kaggle
+
+Kernel `boinhbo/medxir-chunk-corpus` hoàn tất. [Manifest đã tải về](.work/kaggle/status-check/chunk/chunk_manifest.json) ghi corpus v1, `clean-v1`, tham số chunk `350/50/40`, 118 ID bị loại theo cấu hình và 1.023.783 hash group.
+
+| Ngôn ngữ | Chunk |
+|---|---:|
+| EN | 250.487 |
+| VI | 2.128.601 |
+| ZH | 242.465 |
+| **Tổng** | **2.621.553** |
+
+### Embedding toàn bộ corpus
+
+Hai model đã chạy trên cùng 2.621.553 chunk / 987.297.945 token, gồm đủ 9 part: `en-part-000`, `vi-part-000..006`, `zh-part-000`.
+
+| Model | Trạng thái | Kích thước vector | NaN | Artifact |
+|---|---|---:|---:|---|
+| Qwen3-Embedding-0.6B | Hoàn tất 9/9 part; người dùng chạy interactive session và upload thủ công | 1.024 chiều | 0 | [Dataset Kaggle](https://www.kaggle.com/datasets/boinhbo/medxir-vectors-qwen3-0-6b), gồm manifest, 9 `.npy` và 9 parquet `chunk_id` |
+| Qwen3-Embedding-4B | Ba shard Kaggle `s0/s1/s2` đều hoàn tất 3/3 part | 2.560 chiều | 0 | Ba dataset và archive liệt kê bên dưới |
+
+Các embedding được tính với BF16; vector `.npy` lưu dạng float16. Tổng chunk và token trên manifest hai model khớp nhau. Các shard 4B đã kiểm shape, dtype và số hàng ID parquet so với manifest trước khi upload.
+
+| Shard | Part | Dataset | Archive cục bộ |
+|---|---|---|---|
+| s0 | EN-000, VI-002, VI-005 | [medxir-vectors-qwen3-4b-s0](https://www.kaggle.com/datasets/boinhbo/medxir-vectors-qwen3-4b-s0) | `artifacts/kaggle/medxir-vectors-qwen3-4b-s0.zip` |
+| s1 | VI-000, VI-003, VI-006 | [medxir-vectors-qwen3-4b-s1](https://www.kaggle.com/datasets/boinhbo/medxir-vectors-qwen3-4b-s1) | `artifacts/kaggle/medxir-vectors-qwen3-4b-s1.zip` |
+| s2 | VI-001, VI-004, ZH-000 | [medxir-vectors-qwen3-4b-s2](https://www.kaggle.com/datasets/boinhbo/medxir-vectors-qwen3-4b-s2) | `artifacts/kaggle/medxir-vectors-qwen3-4b-s2.zip` |
+
+Mỗi dataset 4B có `embed_manifest.json` và ba cặp `vectors/<part>.npy` / `vectors/<part>-ids.parquet`, tổng cộng 7 file theo Kaggle file listing. Các dataset là private của `boinhbo`.
+
+### Bước tiếp theo
+
+1. Encode 1.200 query bằng Qwen3-Embedding-4B cùng pooling/chuẩn hóa, tìm top-k trên chín part index và merge theo inner product.
+2. Dùng row-map, chunk parquet và `hash_groups` để tạo `relevant_docs`/`relevant_chunks`; xuất, kiểm tra rồi nộp baseline.
+3. Sau baseline, so sánh 0.6B nếu thời gian cho phép. BM25 vẫn hoãn tới khi chốt và đánh giá tokenizer riêng EN/VI/ZH.
+
+Query retrieval, benchmark chất lượng và submission chưa hoàn tất. [Lịch Road to AI 2026](https://r2ai.aiguru.com.vn/) ghi hạn Vòng 1 là 30/10/2026; kế hoạch embedding cũ đặt mốc nội bộ khoảng 26/10.
+
+## 15. Nối dữ liệu và FAISS Qwen3-Embedding-4B — 23/10/2026
+
+### Đã rà soát và chốt data contract
+
+Tải đủ chunk manifest, `hash_groups.parquet` và cả chín chunk parquet từ output của kernel Kaggle `boinhbo/medxir-chunk-corpus` vào `artifacts/kaggle/chunk-corpus-v1/` để đối chiếu thực tế.
+
+- Với từng part, `vectors/<part>.npy[row]`, `<part>-ids.parquet.chunk_id[row]` và `chunks/<lang>/part-NNN.parquet.chunk_id[row]` khớp chính xác theo thứ tự hàng.
+- Đã kiểm tra đủ 2.621.553 hàng, 2.621.553 `chunk_id` duy nhất; không có ID vector thiếu hoặc lặp giữa các part. ID khớp công thức `text_sha256[:16] + "-" + order`; đủ 1.023.783 prefix hash, không collision và mọi thứ tự chunk liên tục.
+- Mỗi `(text_sha256, rep_doc_id)` khớp `hash_groups.parquet`. Lúc truy hồi: FAISS row → row-map → `chunk_id` → chunk gốc để lấy text; `text_sha256` nối hash group. Chỉ fan-out sang nhiều doc ID khi `fanout_safe=true`; nếu không, dùng representative ID.
+- Hợp đồng đầy đủ và quy tắc nối nằm trong [docs/RETRIEVAL_DATA_CONTRACT.md](docs/RETRIEVAL_DATA_CONTRACT.md).
+
+### Index 4B đã tạo
+
+Thêm [scripts/build_faiss_flat_index.py](scripts/build_faiss_flat_index.py) và dependency tùy chọn `retrieval` (`faiss-cpu`). Script kiểm tra manifest, dtype/shape/vector hữu hạn, so sánh row order vector-ID-chunk, xác minh hash group rồi ghi index cùng row-map cho từng part.
+
+- Đã build đủ 9 `IndexFlatIP`, 2.621.553 hàng, dimension 2.560, metric inner product; FAISS 1.15.1. Mỗi index part độc lập, có thể search top-k riêng rồi merge chính xác thành top-k toàn corpus.
+- Index float32 chiếm 26.844.703.125 byte (~25,0 GiB) tổng. Build theo part để vừa RAM; mỗi file khoảng 2,1–3,4 GB.
+- Nguồn `.npy` giữ float16. Khi build, từng batch được nạp thành float32 và chuẩn hóa lại; index lưu float32 để làm baseline chính xác. Chưa thử so sánh ranking thực tế với GPU float16 trên query cuộc thi.
+- Index và row-map hiện ở `artifacts/faiss/qwen3-embedding-4b/` (nằm trong `.gitignore`), chưa upload thành Kaggle dataset. Manifest: `artifacts/faiss/qwen3-embedding-4b/index_manifest.json`.
+
+Kiểm tra đầu ra đã xác nhận 9/9 index đọc được, dimension/metric/count đúng, row-map khớp file ID và truy vấn self-search trên vectors nguồn trả similarity 1,0. Chưa tạo query embedding, chưa chạy retrieval trên 1.200 query, chưa sinh submission hoặc benchmark chất lượng.

@@ -1,0 +1,16 @@
+kernel:
+  id: boinhbo/medxir-faiss-runtime-smoke
+  title: medxir faiss runtime smoke
+  code_file: src/notebooks/kaggle_gpu_smoke.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  dataset_sources: [boinhbo/medxir-retrieval-runtime]
+  timeout_seconds: 1200
+  poll_interval_seconds: 60
+  fetch_files: [faiss_runtime_smoke.json]
+  required_outputs: [faiss_runtime_smoke.json]
+  metrics_file: faiss_runtime_smoke.json
