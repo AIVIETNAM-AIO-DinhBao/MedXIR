@@ -2,7 +2,7 @@
 
 **Cập nhật:** 23/10/2026 (UTC+07:00).
 
-**Giai đoạn hiện tại:** corpus v1 và vectors 0.6B/4B đã hoàn tất. Đã xác minh phép nối 4B từ hàng vector qua `chunk_id` tới chunk gốc và `hash_groups`; đã build đủ chín exact FAISS `IndexFlatIP` cho Qwen3-Embedding-4B. Việc tiếp theo là embed query, chạy dense retrieval, tạo và kiểm tra submission 1.200 query. BM25 được hoãn tới khi chốt tokenizer riêng cho EN/VI/ZH.
+**Giai đoạn hiện tại:** corpus v1 và vectors 0.6B/4B đã hoàn tất. Đã xác minh phép nối 4B từ hàng vector qua `chunk_id` tới chunk gốc và `hash_groups`. Retrieval 4B chạy tìm kiếm chính xác trực tiếp trên vector đã lưu, không dùng FAISS (xem mục 16). Đang chạy lần retrieval đầu tiên trên Kaggle. BM25 được hoãn tới khi chốt tokenizer riêng cho EN/VI/ZH.
 
 Tài liệu này ghi kết quả đã thu được. Các bước thiết kế chưa triển khai được đánh dấu riêng; hướng giải quyết tổng thể nằm trong [PROPOSED_SOLUTION.md](PROPOSED_SOLUTION.md).
 
@@ -475,8 +475,8 @@ Mỗi dataset 4B có `embed_manifest.json` và ba cặp `vectors/<part>.npy` / `
 
 ### Bước tiếp theo
 
-1. Encode 1.200 query bằng Qwen3-Embedding-4B cùng pooling/chuẩn hóa, tìm top-k trên chín part index và merge theo inner product.
-2. Dùng row-map, chunk parquet và `hash_groups` để tạo `relevant_docs`/`relevant_chunks`; xuất, kiểm tra rồi nộp baseline.
+1. Đợi lần chạy retrieval 4B trên Kaggle (`boinhbo/medxir-retrieve-qwen3-4b`, version 4) hoàn tất; kiểm tra `retrieval_manifest.json` và bài nộp 1.200 query.
+2. Nộp baseline 4B lên leaderboard, rồi ghi điểm vào mục này.
 3. Sau baseline, so sánh 0.6B nếu thời gian cho phép. BM25 vẫn hoãn tới khi chốt và đánh giá tokenizer riêng EN/VI/ZH.
 
 Query retrieval, benchmark chất lượng và submission chưa hoàn tất. [Lịch Road to AI 2026](https://r2ai.aiguru.com.vn/) ghi hạn Vòng 1 là 30/10/2026; kế hoạch embedding cũ đặt mốc nội bộ khoảng 26/10.
@@ -489,7 +489,7 @@ Tải đủ chunk manifest, `hash_groups.parquet` và cả chín chunk parquet t
 
 - Với từng part, `vectors/<part>.npy[row]`, `<part>-ids.parquet.chunk_id[row]` và `chunks/<lang>/part-NNN.parquet.chunk_id[row]` khớp chính xác theo thứ tự hàng.
 - Đã kiểm tra đủ 2.621.553 hàng, 2.621.553 `chunk_id` duy nhất; không có ID vector thiếu hoặc lặp giữa các part. ID khớp công thức `text_sha256[:16] + "-" + order`; đủ 1.023.783 prefix hash, không collision và mọi thứ tự chunk liên tục.
-- Mỗi `(text_sha256, rep_doc_id)` khớp `hash_groups.parquet`. Lúc truy hồi: FAISS row → row-map → `chunk_id` → chunk gốc để lấy text; `text_sha256` nối hash group. Chỉ fan-out sang nhiều doc ID khi `fanout_safe=true`; nếu không, dùng representative ID.
+- Mỗi `(text_sha256, rep_doc_id)` khớp `hash_groups.parquet`. Lúc truy hồi: hàng vector → `<part>-ids.parquet` → `chunk_id` → chunk gốc để lấy text; `text_sha256` nối hash group. Chỉ fan-out sang nhiều doc ID khi `fanout_safe=true`; nếu không, dùng representative ID. (Mục 16 thay FAISS row-map bằng cách này.)
 - Hợp đồng đầy đủ và quy tắc nối nằm trong [docs/RETRIEVAL_DATA_CONTRACT.md](docs/RETRIEVAL_DATA_CONTRACT.md).
 
 ### Index 4B đã tạo
@@ -499,6 +499,24 @@ Thêm [scripts/build_faiss_flat_index.py](scripts/build_faiss_flat_index.py) và
 - Đã build đủ 9 `IndexFlatIP`, 2.621.553 hàng, dimension 2.560, metric inner product; FAISS 1.15.1. Mỗi index part độc lập, có thể search top-k riêng rồi merge chính xác thành top-k toàn corpus.
 - Index float32 chiếm 26.844.703.125 byte (~25,0 GiB) tổng. Build theo part để vừa RAM; mỗi file khoảng 2,1–3,4 GB.
 - Nguồn `.npy` giữ float16. Khi build, từng batch được nạp thành float32 và chuẩn hóa lại; index lưu float32 để làm baseline chính xác. Chưa thử so sánh ranking thực tế với GPU float16 trên query cuộc thi.
-- Index và row-map hiện ở `artifacts/faiss/qwen3-embedding-4b/` (nằm trong `.gitignore`), chưa upload thành Kaggle dataset. Manifest: `artifacts/faiss/qwen3-embedding-4b/index_manifest.json`.
+- Index và row-map ở `artifacts/faiss/qwen3-embedding-4b/` (nằm trong `.gitignore`). Đã upload lên Kaggle dataset `boinhbo/medxir-faiss-qwen3-4b-fp32` ngày 23/10 (khoảng 25 GB). Từ 24/10 retrieval không còn dùng index này; sẽ xóa dataset sau khi lần chạy retrieval 24/10 hoàn tất.
 
 Kiểm tra đầu ra đã xác nhận 9/9 index đọc được, dimension/metric/count đúng, row-map khớp file ID và truy vấn self-search trên vectors nguồn trả similarity 1,0. Chưa tạo query embedding, chưa chạy retrieval trên 1.200 query, chưa sinh submission hoặc benchmark chất lượng.
+
+## 16. Retrieval Qwen3-Embedding-4B trên Kaggle — 24/10/2026
+
+**Trạng thái:** lần chạy đầu tiên của `boinhbo/medxir-retrieve-qwen3-4b` (version 4, RTX Pro 6000, Internet tắt) đang chạy. Chưa có điểm và chưa có bài nộp đã kiểm tra.
+
+**Lỗi trước đó:** version 1 đến 3 dừng ở ô cuối với `ValueError`. Nguyên nhân: `doc_ids` đọc từ parquet là mảng numpy, còn ô ghép bài nộp dùng `if not doc_ids:`, trên mảng nhiều phần tử thì Python báo lỗi. Đã đổi sang list Python và kiểm tra logic bằng pandas trên máy local. Log trên Kaggle rỗng trong các lần đó nên không đọc được lỗi từ phía Kaggle; lỗi chỉ thấy khi chạy interactive.
+
+**Thiết kế hiện tại:** không dùng FAISS nữa.
+- Mã hóa 1.200 query bằng Qwen3-Embedding-4B, theo đúng tiền tố `Instruct: … Query:` và pooling token cuối của model card, chuẩn hóa L2.
+- Nạp từng part vector (`vectors/<part>.npy`, float16) từ ba dataset `medxir-vectors-qwen3-4b-s0..s2` lên GPU, tính tích vô hướng bằng float32, lấy top 20 mỗi part, rồi gộp thành top 20 toàn corpus. Đây là tìm kiếm chính xác, tương đương `IndexFlatIP`.
+- Map hàng vector → `chunk_id` qua `<part>-ids.parquet`, rồi lấy chunk gốc từ `chunks/<lang>/part-NNN.parquet` và nhóm trùng từ `hash_groups.parquet`. Chỉ fan-out doc ID khi `fanout_safe=true`.
+- `TOP_CHUNKS = 20` là giá trị đặt tạm, chưa tune.
+
+**Lý do đổi khỏi FAISS:** index FAISS chỉ là bản sao của cùng vector float16. Runtime FAISS không có sẵn trên image RTX của Kaggle và gây lỗi import trong quá trình debug. Tìm bằng PyTorch cho cùng phép tính.
+
+**Dọn dẹp sau khi lần chạy xong:** xóa `boinhbo/medxir-faiss-qwen3-4b-fp32` và `boinhbo/medxir-retrieval-runtime` trên Kaggle. Bản local `artifacts/faiss/` vẫn giữ.
+
+**Mã nguồn:** [scripts/build_retrieval_notebook.py](scripts/build_retrieval_notebook.py), [src/notebooks/kaggle_retrieve_qwen3_4b.ipynb](src/notebooks/kaggle_retrieve_qwen3_4b.ipynb), [configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml](configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml).
