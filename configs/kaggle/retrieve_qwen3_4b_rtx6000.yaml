@@ -1,4 +1,5 @@
-# Offline GPU retrieval using the already-uploaded FP32 IndexFlatIP files.
+# Exact dense retrieval over the stored Qwen3-Embedding-4B vectors (no FAISS).
+# machine_shape NvidiaRtxPro6000 is the RTX Pro 6000 value; the hardware check fails any other GPU.
 kernel:
   id: boinhbo/medxir-retrieve-qwen3-4b
   title: medxir retrieve qwen3 4b
@@ -11,7 +12,9 @@ kernel:
   competition_sources: [arc-prize-2026-arc-agi-3]
   kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
   dataset_sources:
-    - boinhbo/medxir-faiss-qwen3-4b-fp32
+    - boinhbo/medxir-vectors-qwen3-4b-s0
+    - boinhbo/medxir-vectors-qwen3-4b-s1
+    - boinhbo/medxir-vectors-qwen3-4b-s2
     - boinhbo/medxir-retrieval-inputs
   timeout_seconds: 21600
   poll_interval_seconds: 120
