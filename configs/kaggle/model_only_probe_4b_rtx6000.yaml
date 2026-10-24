@@ -1,0 +1,14 @@
+# Diagnostic only: loads Qwen3-Embedding-4B WITHOUT the vector datasets mounted.
+kernel:
+  id: boinhbo/medxir-model-only-probe-4b
+  title: medxir model only probe 4b
+  code_file: src/notebooks/kaggle_model_probe_4b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
+  timeout_seconds: 3600
+  poll_interval_seconds: 30
