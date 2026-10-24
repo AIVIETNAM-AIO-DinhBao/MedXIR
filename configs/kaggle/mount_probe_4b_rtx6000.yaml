@@ -1,0 +1,19 @@
+# Diagnostic only: same data sources as the retrieval kernel, no retrieval code. Checks whether the mount itself fails.
+kernel:
+  id: boinhbo/medxir-mount-probe-4b
+  title: medxir mount probe 4b
+  code_file: src/notebooks/kaggle_mount_probe_4b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
+  dataset_sources:
+    - boinhbo/medxir-vectors-qwen3-4b-s0
+    - boinhbo/medxir-vectors-qwen3-4b-s1
+    - boinhbo/medxir-vectors-qwen3-4b-s2
+    - boinhbo/medxir-retrieval-inputs
+  timeout_seconds: 3600
+  poll_interval_seconds: 30
