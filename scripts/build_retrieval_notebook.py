@@ -30,14 +30,52 @@ Run on RTX Pro 6000 with Internet OFF. Attach the three vector datasets, the ret
 the chunk corpus kernel output and the package model kernel output.
 """
 
-CODE_SETUP = """
-import glob
+CODE_HELPERS = """
+import faulthandler
 import json
 import os
-import subprocess
+import resource
 import time
-import zipfile
+import traceback
+from contextlib import contextmanager
 from pathlib import Path
+
+OUT = Path('/kaggle/working')
+OUT.mkdir(parents=True, exist_ok=True)
+T0 = time.perf_counter()
+PROGRESS = OUT / 'progress.txt'
+FAULT_FILE = open(OUT / 'faulthandler.txt', 'w')  # native crashes dump the Python stack here
+faulthandler.enable(file=FAULT_FILE, all_threads=True)
+FAILED = None
+
+
+def note(message):
+    rss_gib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20  # Linux reports KiB
+    line = f'{time.perf_counter() - T0:8.1f}s  peak_rss={rss_gib:.1f}GiB  {message}'
+    print(line, flush=True)
+    with open(PROGRESS, 'a', encoding='utf-8') as file:
+        file.write(line + '\\n')
+
+
+@contextmanager
+def stage(name):
+    # A Python exception is written to retrieval_error.txt and does not stop the kernel, so the
+    # session ends COMPLETE and the files can be fetched; later steps are skipped.
+    global FAILED
+    note(f'start {name}')
+    try:
+        yield
+        note(f'done {name}')
+    except Exception:
+        FAILED = name
+        (OUT / 'retrieval_error.txt').write_text(f'stage: {name}\\n\\n{traceback.format_exc()}', encoding='utf-8')
+        note(f'FAILED {name}; traceback in retrieval_error.txt')
+"""
+
+CODE_SETUP = """
+import glob
+import subprocess
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -50,9 +88,6 @@ MAX_LENGTH = 1024
 EMBED_BATCH = 8
 SEARCH_BATCH = 64
 TOP_CHUNKS = 20  # chunks per query; not tuned yet
-OUT = Path('/kaggle/working')
-OUT.mkdir(parents=True, exist_ok=True)
-T0 = time.perf_counter()
 
 
 def one_match(pattern, description):
@@ -239,18 +274,34 @@ result = dict(
 print(json.dumps(result, indent=2))
 """
 
+def guarded(name, source):
+    """Indent a step under stage(name) and skip it when an earlier step failed."""
+    body = '\n'.join(('        ' + line) if line.strip() else '' for line in source.strip('\n').splitlines())
+    return f"if FAILED is None:\n    with stage({name!r}):\n{body}\n"
+
+
+CODE_REPORT = """
+note('finished; status ' + ('error' if FAILED else 'ok'))
+if FAILED:
+    (OUT / 'retrieval_manifest.json').write_text(json.dumps(
+        dict(status='error', failed_stage=FAILED, error_file='retrieval_error.txt'), indent=2) + '\\n')
+"""
+
 CELLS = [
     ('md', MARKDOWN_INTRO),
+    ('code', CODE_HELPERS),
     ('md', '## 1. Inputs and GPU check'),
-    ('code', CODE_SETUP),
+    ('code', guarded('setup', CODE_SETUP)),
     ('md', '## 2. Encode the queries with the corpus instruction and pooling'),
-    ('code', CODE_ENCODE),
+    ('code', guarded('encode', CODE_ENCODE)),
     ('md', '## 3. Exact search, one vector part at a time'),
-    ('code', CODE_SEARCH),
+    ('code', guarded('search', CODE_SEARCH)),
     ('md', '## 4. Join candidates to chunk text and document groups'),
-    ('code', CODE_JOIN),
+    ('code', guarded('join', CODE_JOIN)),
     ('md', '## 5. Write and validate the submission'),
-    ('code', CODE_SUBMIT),
+    ('code', guarded('submit', CODE_SUBMIT)),
+    ('md', '## 6. Report'),
+    ('code', CODE_REPORT),
 ]
 
 

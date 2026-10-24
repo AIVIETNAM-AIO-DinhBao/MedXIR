@@ -19,6 +19,8 @@ kernel:
   timeout_seconds: 21600
   poll_interval_seconds: 120
   fetch_files:
+    - progress.txt
+    - faulthandler.txt
     - retrieval_manifest.json
     - medxir-qwen3-4b-submission.json
     - medxir-qwen3-4b-submission.zip
