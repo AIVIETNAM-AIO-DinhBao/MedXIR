@@ -43,6 +43,7 @@ uv run python -m tools.kaggle kernel fetch boinhbo/<slug> --destination <dir> --
 
 ## Quy tắc chung của dự án
 
+- **Tuyệt đối không chạy việc nặng trên máy local** (WSL2, 15 GB RAM, 16 luồng). Tokenize/lập chỉ mục corpus, BM25, ma trận thưa lớn, search trên toàn bộ vector, reparse hàng loạt: tất cả chạy trên Kaggle (CPU có ~30 GB RAM, GPU qua `tools/kaggle`). Local chỉ dùng cho việc nhẹ: sửa code, kiểm tra cú pháp, thử trên mẫu nhỏ (vài nghìn dòng), gộp/xuất kết quả đã có top-k. Cần chạy nặng thì dừng lại, dựng notebook Kaggle rồi chạy ở đó. Trước mỗi lệnh chạy dài, ước lượng RAM/CPU; không đoán. Lý do: ngày 25/10/2026 BM25 chạy local bị hết RAM (exit 137) hai lần, làm phiên Claude Code khởi động lại và mất các tác vụ nền.
 - Chunk: dùng nguyên `chunk_document()` trong `scripts/chunking.py` (350/50/40; số từ với VI/EN, số chữ / 2 với ZH). `chunk_text` luôn là `text[start:end]` của văn bản đã làm sạch (`scripts/text_clean.py`).
 - Không xóa `doc_id`. Nội dung trùng thì embed một lần, rồi mở rộng kết quả qua `hash_groups` (mặc định chỉ mở rộng nhóm `fanout_safe`). 118 id pharmacity bị redirect sai nằm trong `artifacts/aux_v1/exclusions.csv`.
 - Không vượt chặn của website (không dùng VPN, không xoay IP).
