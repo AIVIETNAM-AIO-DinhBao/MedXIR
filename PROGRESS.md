@@ -559,11 +559,14 @@ BM25 (`scripts/bm25_vi.py`, chạy trên Kaggle CPU bằng `configs/kaggle/bm25_
 - Xóa `artifacts/crawl/` (pilot 11/10). Trước khi xóa, đối chiếu với `dataset/links_corpus_vi_en_zh.parquet`: 10.000 tài liệu gồm 5.344 ID không có trong parquet, 4.372 ID đã có trong `corpus_v1` (4.353 giống hệt văn bản), 284 ID có trong parquet nhưng chưa có trong v1. Trong 284 ID này, 76 thuộc 120ask (nguồn bị chặn, loại), còn 208 dùng được, trong đó 140 có văn bản. 140 tài liệu đó được trích vào [artifacts/corpus_v1_patch/crawl_gap_v1_1.jsonl](artifacts/corpus_v1_patch/crawl_gap_v1_1.jsonl) (đã kiểm tra: id khớp parquet, url khớp 100%). Trạng thái của cả 284 ID nằm ở [crawl_gap_status.csv](artifacts/corpus_v1_patch/crawl_gap_status.csv).
 - Đã xóa `.work/` (debug/smoke) và `artifacts/readiness_check/`.
 
-**Đang chạy, chưa xác minh:**
-- Upload `artifacts/recrawl_20261015/{cc_v1, pharmacity_v1, wayback_v1}` lên `gdrive:coordination/recrawl_20261015/local_only/`. Đây là dữ liệu chỉ có ở local (cc 4,7 GB, pharmacity 772 MB, wayback 10 MB). Tốc độ khoảng 7,8 MB/phút, ước tính cc cần hơn 10 giờ. Khi xong phải chạy `rclone check` (không phải `--one-way` lúc đang copy). Chưa xóa bản local của ba thư mục này.
-- Recrawl local: không xóa gì. Phần lớn dung lượng là `state.sqlite` (checkpoint để resume), không có bản trên Drive. Batch local chỉ khoảng 77 MB.
+**Quyết định (25/10):**
+- Không upload `cc_v1` và `pharmacity_v1` lên Drive: ước tính hơn 10 giờ với tốc độ ~7,8 MB/phút, và chưa có việc cần dùng ngay. Đã xóa bản `cc_v1` upload dở trên Drive.
+- `wayback_v1` (9 MB) đã upload lên `gdrive:coordination/recrawl_20261015/local_only/wayback_v1` và kiểm tra khớp (435 file, 0 khác biệt).
+- Giữ bản local của `cc_v1` (4,7 GB) và `pharmacity_v1` (772 MB). Đây là bản duy nhất của raw; ổ đĩa còn trống 922 GB nên không cần xóa.
+- Không reparse ZH và không làm v1.1 bây giờ. Corpus v1 giữ nguyên làm nền cho thí nghiệm reranker. Tác động của ZH parser v2.3 chưa đo được; làm sau khi có kết quả reranker.
+- 140 tài liệu trong patch chưa nhập vào corpus, vì nhập sẽ kéo theo chunk và embed mới. File patch giữ lại để làm sau.
 
-**Kế hoạch corpus v1.1 (chưa làm):**
+**Kế hoạch corpus v1.1 (hoãn, chỉ làm nếu còn thời gian sau reranker):**
 1. Thêm 140 tài liệu trong `crawl_gap_v1_1.jsonl`.
 2. Thêm tài liệu VI từ 7 batch upload sau khi build v1 (4.753 ID chưa có trong v1, 4.733 có văn bản). Cần loại nguồn bị chặn trước khi nhập.
 3. Reparse ZH từ parser v2.3 lên v2.4 trở lên (khoảng 72k tài liệu, raw ZH có trên Drive). Cần đo số văn bản thực sự đổi trước.
