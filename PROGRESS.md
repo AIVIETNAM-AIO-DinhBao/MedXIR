@@ -519,4 +519,6 @@ Kiểm tra đầu ra đã xác nhận 9/9 index đọc được, dimension/metri
 
 **Dọn dẹp sau khi lần chạy xong:** xóa `boinhbo/medxir-faiss-qwen3-4b-fp32` và `boinhbo/medxir-retrieval-runtime` trên Kaggle. Bản local `artifacts/faiss/` vẫn giữ.
 
+**Cập nhật 25/10:** lần chạy encode trên Kaggle (`medxir-encode-queries-4b`) hoàn tất ở 495 giây, RSS đỉnh 5,7 GiB. Kernel tìm kiếm trên Kaggle (`medxir-retrieve-qwen3-4b`) chết ngay khi đọc file vector, không có log; probe `medxir-vector-read-probe` đọc đầy đủ một file vector cũng chết. Kết luận tạm: đọc file vector từ dataset mount trên Kaggle là điểm lỗi. Tìm kiếm chuyển sang máy local bằng `scripts/retrieve_local_4b.py` (CPU, float32, 141 giây). Bài nộp `artifacts/submission/medxir-qwen3-4b-submission.json` đủ 1.200 query, mỗi query 20 chunk, mọi `chunk_text` là nguyên văn. Chưa nộp lên leaderboard; điểm chưa biết.
+
 **Mã nguồn:** [scripts/build_retrieval_notebook.py](scripts/build_retrieval_notebook.py), [src/notebooks/kaggle_retrieve_qwen3_4b.ipynb](src/notebooks/kaggle_retrieve_qwen3_4b.ipynb), [configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml](configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml).
