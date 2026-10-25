@@ -1,0 +1,16 @@
+# Diagnostic only: reads one full vector part from the mounted dataset, no model.
+kernel:
+  id: boinhbo/medxir-vector-read-probe
+  title: medxir vector read probe
+  code_file: src/notebooks/kaggle_vector_read_probe.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  dataset_sources:
+    - boinhbo/medxir-vectors-qwen3-4b-s0
+    - boinhbo/medxir-retrieval-inputs
+  timeout_seconds: 3600
+  poll_interval_seconds: 30
