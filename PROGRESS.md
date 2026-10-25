@@ -583,5 +583,9 @@ Ghi chú: file `medxir-qwen3-4b-d200-c100-submission.zip` được tạo lại b
 | Bản | Kích thước | Ghi chú |
 |---|---:|---|
 | d200-c100 | 59,7 MB | Đã nộp, FINAL 0,1783 |
-| d200-c150 | 90,0 MB | Ứng viên tiếp theo |
+| **d200-c150** | 90,0 MB | **Đã nộp, FINAL 0,1847 (tốt nhất hiện tại)** |
 | d200-c200 | 121 MB | Vượt giới hạn, không nộp được |
+
+**Kết quả d200-c150 (đã nộp):** FINAL 0,1847; Doc F2 0,2612; Chunk F2 0,1081 (P 0,0665, R 0,1696).
+
+Xu hướng Chunk F2 theo số chunk/query (cùng 200 doc): 20 → 0,042; 100 → 0,095; 150 → 0,108. Mỗi 50 chunk thêm tăng ít dần (+0,013 ở 100→150), trong khi precision giảm. Chunk tiếp theo bị giới hạn 100 MB chặn lại. Các cải thiện tiếp theo cần đến từ thứ tự xếp hạng (reranker, hybrid), không chỉ từ số lượng.
