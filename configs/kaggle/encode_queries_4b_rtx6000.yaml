@@ -1,0 +1,24 @@
+# Step 1 of retrieval: Qwen3-Embedding-4B encodes the 1,200 queries. No vector dataset is attached,
+# so the model load runs alone. Outputs query_vectors.npy and query_ids.json for the search kernel.
+kernel:
+  id: boinhbo/medxir-encode-queries-4b
+  title: medxir encode queries 4b
+  code_file: src/notebooks/kaggle_encode_queries_4b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-package-models]
+  dataset_sources: [boinhbo/medxir-retrieval-inputs]
+  timeout_seconds: 3600
+  poll_interval_seconds: 60
+  fetch_files:
+    - progress.txt
+    - faulthandler.txt
+    - query_vectors.npy
+    - query_ids.json
+  required_outputs:
+    - query_vectors.npy
+    - query_ids.json

@@ -1,16 +1,16 @@
-# Exact dense retrieval over the stored Qwen3-Embedding-4B vectors (no FAISS).
-# machine_shape NvidiaRtxPro6000 is the RTX Pro 6000 value; the hardware check fails any other GPU.
+# Step 2 of retrieval: exact search over the stored Qwen3-Embedding-4B vectors. No model is loaded here;
+# query vectors come from the encode kernel. Set the RTX Pro 6000 option via machine_shape.
 kernel:
   id: boinhbo/medxir-retrieve-qwen3-4b
   title: medxir retrieve qwen3 4b
-  code_file: src/notebooks/kaggle_retrieve_qwen3_4b.ipynb
+  code_file: src/notebooks/kaggle_search_4b.ipynb
   kernel_type: notebook
   enable_gpu: true
   enable_internet: false
   machine_shape: NvidiaRtxPro6000
   expected_hardware_contains: "6000"
   competition_sources: [arc-prize-2026-arc-agi-3]
-  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-models]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-encode-queries-4b]
   dataset_sources:
     - boinhbo/medxir-vectors-qwen3-4b-s0
     - boinhbo/medxir-vectors-qwen3-4b-s1
