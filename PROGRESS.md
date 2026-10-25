@@ -573,3 +573,15 @@ BM25 (`scripts/bm25_vi.py`, chạy trên Kaggle CPU bằng `configs/kaggle/bm25_
 4. Chunk và embed phần đổi: chunk ID là `text_sha256[:16]-order`, nên văn bản không đổi thì giữ vector cũ.
 5. Đăng ký v1.1 là một version mới của dataset Kaggle, giữ v1 để tái lập.
 Pending 26.179 ID (suckhoedoisong, longchau theo quota) không đưa vào v1.1 vì cần crawl lại và đang bị chặn.
+
+### Giới hạn kích thước bài nộp — 25/10/2026
+
+Dashboard từ chối file trên 100 MB. Bản d200 với 200 chunk/query nặng 121 MB (đã nén mức 9, JSON gọn), nên không nộp được. Chunk text phải nguyên văn nên không rút gọn được nội dung. Chọn 150 chunk/query: 90 MB, nằm trong giới hạn.
+
+Ghi chú: file `medxir-qwen3-4b-d200-c100-submission.zip` được tạo lại bằng nén mức 9 nên khác byte với bản đã nộp (59,7 MB thay vì 60,2 MB). Nội dung chunk và doc giống hệt.
+
+| Bản | Kích thước | Ghi chú |
+|---|---:|---|
+| d200-c100 | 59,7 MB | Đã nộp, FINAL 0,1783 |
+| d200-c150 | 90,0 MB | Ứng viên tiếp theo |
+| d200-c200 | 121 MB | Vượt giới hạn, không nộp được |

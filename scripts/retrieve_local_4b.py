@@ -174,8 +174,8 @@ def validate(submission, queries, corpus_ids):
 def write_submission(submission, out, name):
     json_path = out / f'{name}.json'
     zip_path = out / f'{name}.zip'
-    json_path.write_text(json.dumps(submission, ensure_ascii=False) + '\n', encoding='utf-8')
-    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    json_path.write_text(json.dumps(submission, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         archive.write(json_path, arcname=json_path.name)
     with zipfile.ZipFile(zip_path) as archive:
         assert archive.namelist() == [json_path.name]
