@@ -445,7 +445,7 @@ Reprobe 14 nguồn cũ: Long Châu/Việt Đức mở lại, 12 nguồn còn l�
 
 ### Chunking corpus trên Kaggle
 
-Kernel `boinhbo/medxir-chunk-corpus` hoàn tất. [Manifest đã tải về](.work/kaggle/status-check/chunk/chunk_manifest.json) ghi corpus v1, `clean-v1`, tham số chunk `350/50/40`, 118 ID bị loại theo cấu hình và 1.023.783 hash group.
+Kernel `boinhbo/medxir-chunk-corpus` hoàn tất. [Manifest đã tải về](artifacts/kaggle/chunk-corpus-v1/chunk_manifest.json) ghi corpus v1, `clean-v1`, tham số chunk `350/50/40`, 118 ID bị loại theo cấu hình và 1.023.783 hash group.
 
 | Ngôn ngữ | Chunk |
 |---|---:|
@@ -551,3 +551,22 @@ Nhận xét: số doc tối ưu quanh 200; tăng số chunk làm Chunk F2 tăng 
 BM25 (`scripts/bm25_vi.py`, chạy trên Kaggle CPU bằng `configs/kaggle/bm25_vi.yaml`): âm tiết và cặp âm tiết liền kề, chuẩn hóa NFKC và vị trí dấu thanh, bỏ stopword và câu xã giao ở phía query, IDF/độ dài toàn corpus. Chạy BM25 trên máy local bị hết RAM hai lần; việc nặng chạy trên Kaggle (AGENT.md).
 
 **Mã nguồn:** [scripts/build_retrieval_notebook.py](scripts/build_retrieval_notebook.py), [src/notebooks/kaggle_retrieve_qwen3_4b.ipynb](src/notebooks/kaggle_retrieve_qwen3_4b.ipynb), [configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml](configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml).
+
+## Dọn dẹp artifacts và kế hoạch corpus v1.1 — 25/10/2026
+
+**Đã làm:**
+- Xóa `artifacts/crawl_full/` (plan 4,38 triệu URL cũ, không còn trong corpus).
+- Xóa `artifacts/crawl/` (pilot 11/10). Trước khi xóa, đối chiếu với `dataset/links_corpus_vi_en_zh.parquet`: 10.000 tài liệu gồm 5.344 ID không có trong parquet, 4.372 ID đã có trong `corpus_v1` (4.353 giống hệt văn bản), 284 ID có trong parquet nhưng chưa có trong v1. Trong 284 ID này, 76 thuộc 120ask (nguồn bị chặn, loại), còn 208 dùng được, trong đó 140 có văn bản. 140 tài liệu đó được trích vào [artifacts/corpus_v1_patch/crawl_gap_v1_1.jsonl](artifacts/corpus_v1_patch/crawl_gap_v1_1.jsonl) (đã kiểm tra: id khớp parquet, url khớp 100%). Trạng thái của cả 284 ID nằm ở [crawl_gap_status.csv](artifacts/corpus_v1_patch/crawl_gap_status.csv).
+- Đã xóa `.work/` (debug/smoke) và `artifacts/readiness_check/`.
+
+**Đang chạy, chưa xác minh:**
+- Upload `artifacts/recrawl_20261015/{cc_v1, pharmacity_v1, wayback_v1}` lên `gdrive:coordination/recrawl_20261015/local_only/`. Đây là dữ liệu chỉ có ở local (cc 4,7 GB, pharmacity 772 MB, wayback 10 MB). Tốc độ khoảng 7,8 MB/phút, ước tính cc cần hơn 10 giờ. Khi xong phải chạy `rclone check` (không phải `--one-way` lúc đang copy). Chưa xóa bản local của ba thư mục này.
+- Recrawl local: không xóa gì. Phần lớn dung lượng là `state.sqlite` (checkpoint để resume), không có bản trên Drive. Batch local chỉ khoảng 77 MB.
+
+**Kế hoạch corpus v1.1 (chưa làm):**
+1. Thêm 140 tài liệu trong `crawl_gap_v1_1.jsonl`.
+2. Thêm tài liệu VI từ 7 batch upload sau khi build v1 (4.753 ID chưa có trong v1, 4.733 có văn bản). Cần loại nguồn bị chặn trước khi nhập.
+3. Reparse ZH từ parser v2.3 lên v2.4 trở lên (khoảng 72k tài liệu, raw ZH có trên Drive). Cần đo số văn bản thực sự đổi trước.
+4. Chunk và embed phần đổi: chunk ID là `text_sha256[:16]-order`, nên văn bản không đổi thì giữ vector cũ.
+5. Đăng ký v1.1 là một version mới của dataset Kaggle, giữ v1 để tái lập.
+Pending 26.179 ID (suckhoedoisong, longchau theo quota) không đưa vào v1.1 vì cần crawl lại và đang bị chặn.
