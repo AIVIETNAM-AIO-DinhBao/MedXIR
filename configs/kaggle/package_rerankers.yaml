@@ -1,0 +1,13 @@
+# CPU, Internet ON: snapshot four multilingual rerankers at pinned commits (docs: scripts/build_rerank_notebooks.py).
+# The benchmark attaches the output with kernel_sources: [boinhbo/medxir-package-rerankers].
+kernel:
+  id: boinhbo/medxir-package-rerankers
+  title: medxir package rerankers
+  code_file: src/notebooks/kaggle_package_rerankers.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  timeout_seconds: 7200
+  poll_interval_seconds: 60
+  fetch_files: [models/MODELS.json]
+  required_outputs: [models/MODELS.json]

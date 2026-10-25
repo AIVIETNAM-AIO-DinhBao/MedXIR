@@ -1,0 +1,18 @@
+# RTX Pro 6000, Internet OFF: rerankers come from the offline package kernel; candidates from the dataset.
+# Set QUERY_LIMIT in the notebook (default 100 = speed check; 0 = all 1,200 queries).
+kernel:
+  id: boinhbo/medxir-rerank-benchmark-rtx6000
+  title: medxir rerank benchmark rtx6000
+  code_file: src/notebooks/kaggle_rerank_benchmark.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  dataset_sources: [boinhbo/medxir-rerank-candidates]
+  kernel_sources: [boinhbo/medxir-package-rerankers]
+  timeout_seconds: 21600
+  poll_interval_seconds: 120
+  metrics_file: rerank_benchmark.json
+  fetch_files: [rerank_benchmark.json, scores_Qwen3-Reranker-0.6B.parquet, scores_Qwen3-Reranker-4B.parquet, scores_bge-reranker-v2-m3.parquet, scores_jina-reranker-v3.5.parquet]
+  required_outputs: [rerank_benchmark.json]
