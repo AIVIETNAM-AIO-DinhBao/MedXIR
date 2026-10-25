@@ -1,4 +1,4 @@
-"""Exact dense retrieval on this machine (CPU) over the stored Qwen3-Embedding-4B vectors, then the submission.
+"""Exact dense retrieval on this machine (CPU) over the stored Qwen3-Embedding-4B vectors, then the submissions.
 
 Used when the Kaggle search kernel cannot read the vector datasets (it dies on the first full read).
 The query vectors come from the Kaggle encode kernel (notebooks/kaggle_encode_queries_4b.ipynb).
@@ -11,12 +11,18 @@ Inputs (local, read-only):
   artifacts/kaggle/chunk-corpus-v1/hash_groups.parquet                  duplicate-text groups
   dataset/query.parquet, dataset/links_corpus_vi_en_zh.parquet
 
-Output (artifacts/submission/): medxir-qwen3-4b-submission.json, .zip, retrieval_manifest.json.
+Output (artifacts/submission/):
+  candidates-4b-k<K>.npz                       cached top-K chunk candidates per query (reused on rerun)
+  medxir-qwen3-4b-d<N>-submission.json, .zip   one submission per document count N
+  retrieval_manifest.json
 
-Method: each part is scored by an exact float32 matrix product, its top-k is kept, and the per-part
-candidates are merged into the global top-k. The same logic as scripts/build_retrieval_notebook.py.
+Method: each part is scored by an exact float32 matrix product, its top-K is kept, and the per-part
+candidates are merged into the global top-K. The chunk list of every submission is the top TOP_CHUNKS
+chunks. The document list is scored separately: a document's score is the best score of its candidate
+chunks, and the N best documents are listed. Document and chunk metrics are computed independently, so N
+trades document precision for document recall without touching the chunk list.
 
-    uv run python scripts/retrieve_local_4b.py
+    uv run python scripts/retrieve_local_4b.py --doc-counts 20,30,50,100
 """
 import argparse
 import json
@@ -33,57 +39,71 @@ TOP_CHUNKS = 20
 QUERY_BATCH = 200
 
 
-def search(query_vectors, vector_paths):
-    """Return per_query: for each query, the TOP_CHUNKS best (score, part, row) over all parts."""
-    per_query = [[] for _ in range(len(query_vectors))]
-    for path in vector_paths:
-        key = path.stem
+def search(query_vectors, vector_paths, top_k):
+    """Return (scores, part_index, rows), each shaped (queries, top_k), sorted by score descending."""
+    n = len(query_vectors)
+    all_scores, all_parts, all_rows = [], [], []
+    for part_index, path in enumerate(vector_paths):
         vectors = np.load(path).astype(np.float32)
-        assert vectors.shape[1] == query_vectors.shape[1] and np.isfinite(vectors).all(), key
-        k = min(TOP_CHUNKS, len(vectors))
-        for start in range(0, len(query_vectors), QUERY_BATCH):
+        assert vectors.shape[1] == query_vectors.shape[1] and np.isfinite(vectors).all(), path.stem
+        k = min(top_k, len(vectors))
+        part_scores = np.empty((n, k), dtype=np.float32)
+        part_rows = np.empty((n, k), dtype=np.int64)
+        for start in range(0, n, QUERY_BATCH):
             scores = query_vectors[start:start + QUERY_BATCH] @ vectors.T
             top = np.argpartition(-scores, k - 1, axis=1)[:, :k]
-            top_scores = np.take_along_axis(scores, top, axis=1)
-            for offset in range(len(top)):
-                per_query[start + offset].extend(
-                    (float(s), key, int(r)) for s, r in zip(top_scores[offset], top[offset]))
-        print(key, f'{len(vectors):,} rows', flush=True)
+            part_scores[start:start + QUERY_BATCH] = np.take_along_axis(scores, top, axis=1)
+            part_rows[start:start + QUERY_BATCH] = top
+        all_scores.append(part_scores)
+        all_rows.append(part_rows)
+        all_parts.append(np.full((n, k), part_index, dtype=np.int16))
+        print(path.stem, f'{len(vectors):,} rows', flush=True)
         del vectors
-    for qi in range(len(per_query)):
-        per_query[qi].sort(key=lambda item: item[0], reverse=True)
-        per_query[qi] = per_query[qi][:TOP_CHUNKS]
-    return per_query
+    scores, parts, rows = (np.concatenate(a, axis=1) for a in (all_scores, all_parts, all_rows))
+    order = np.argsort(-scores, axis=1, kind='stable')[:, :top_k]
+    return tuple(np.take_along_axis(a, order, axis=1) for a in (scores, parts, rows))
 
 
-def chunk_id_map(per_query, vector_roots):
-    """(part, row) -> chunk_id, read from each part's ids file next to its .npy."""
-    wanted = {}
-    for query_rows in per_query:
-        for _, key, row in query_rows:
-            wanted.setdefault(key, set()).add(row)
-    chunk_id_at = {}
-    for key, rows in wanted.items():
-        ids_path = next(root / f'{key}-ids.parquet' for root in vector_roots if (root / f'{key}-ids.parquet').exists())
-        column = pq.read_table(ids_path, columns=['chunk_id']).column('chunk_id').to_pylist()
-        chunk_id_at[key] = {row: column[row] for row in rows}
-    return chunk_id_at
+def load_or_search(cache_path, query_vectors, vector_paths, top_k):
+    keys = [path.stem for path in vector_paths]
+    if cache_path.exists():
+        cached = np.load(cache_path)
+        assert cached['keys'].tolist() == keys and cached['scores'].shape == (len(query_vectors), top_k)
+        print('candidates from cache', cache_path.name, flush=True)
+        return cached['scores'], cached['parts'], cached['rows']
+    scores, parts, rows = search(query_vectors, vector_paths, top_k)
+    np.savez(cache_path, scores=scores, parts=parts, rows=rows, keys=np.array(keys))
+    return scores, parts, rows
 
 
-def chunk_records(chunk_files, wanted_ids):
+def chunk_ids(parts, rows, vector_paths):
+    """(queries, top_k) array of chunk_id, read from each part's ids file next to its .npy."""
+    ids = np.empty(parts.shape, dtype=object)
+    for part_index, path in enumerate(vector_paths):
+        mask = parts == part_index
+        if mask.any():
+            column = np.array(pq.read_table(path.with_name(f'{path.stem}-ids.parquet'),
+                                            columns=['chunk_id']).column('chunk_id').to_pylist(), dtype=object)
+            ids[mask] = column[rows[mask]]
+    return ids
+
+
+def chunk_records(chunk_files, wanted_ids, text_ids):
+    """chunk_id -> text_sha256, rep_doc_id, order; chunk_text only for text_ids (the submitted chunks)."""
     records = {}
     for path in chunk_files:
-        table = pq.read_table(path, columns=['chunk_id', 'text_sha256', 'rep_doc_id', 'lang', 'order', 'chunk_text'])
-        names = table.column('chunk_id').to_pylist()
-        for i, cid in enumerate(names):
-            if cid in wanted_ids:
-                records[cid] = dict(
-                    text_sha256=table.column('text_sha256')[i].as_py(),
-                    rep_doc_id=int(table.column('rep_doc_id')[i].as_py()),
-                    chunk_order=int(table.column('order')[i].as_py()),
-                    chunk_text=table.column('chunk_text')[i].as_py(),
-                )
-        del table
+        table = pq.read_table(path, columns=['chunk_id', 'text_sha256', 'rep_doc_id', 'order', 'chunk_text'])
+        frame = table.select(['chunk_id', 'text_sha256', 'rep_doc_id', 'order']).to_pandas()
+        keep = frame['chunk_id'].isin(wanted_ids).to_numpy()
+        for i in np.flatnonzero(keep):
+            cid = frame['chunk_id'].iat[i]
+            records[cid] = dict(
+                text_sha256=frame['text_sha256'].iat[i],
+                rep_doc_id=int(frame['rep_doc_id'].iat[i]),
+                chunk_order=int(frame['order'].iat[i]),
+                chunk_text=table.column('chunk_text')[int(i)].as_py() if cid in text_ids else None,
+            )
+        del table, frame
     return records
 
 
@@ -95,43 +115,75 @@ def group_lookup(hash_path):
     }
 
 
-def build_submission(queries, per_query, chunk_id_at, records, lookup):
-    submission, empty = [], 0
+def docs_of(record, lookup):
+    return lookup.get(record['text_sha256']) or [record['rep_doc_id']]
+
+
+def ranked_docs(query_ids, records, lookup):
+    """Documents in order of their best candidate chunk (candidates are already sorted by score)."""
+    ranked, seen = [], set()
+    for cid in query_ids:
+        for doc_id in docs_of(records[cid], lookup):
+            if doc_id not in seen:
+                seen.add(doc_id)
+                ranked.append(doc_id)
+    return ranked
+
+
+def build_submission(queries, ids, records, lookup, doc_count):
+    submission = []
     for qi, query_id in enumerate(queries['id'].tolist()):
-        chunks, relevant_docs, seen = [], [], set()
-        for _, key, row in per_query[qi]:
-            record = records[chunk_id_at[key][row]]
-            doc_ids = lookup.get(record['text_sha256'])
-            if not doc_ids:
-                doc_ids = [record['rep_doc_id']]
-            for doc_id in doc_ids:
-                if doc_id not in seen:
-                    seen.add(doc_id)
-                    relevant_docs.append(doc_id)
-                chunks.append(dict(doc_id=doc_id, chunk_text=record['chunk_text'],
-                                   chunk_order=record['chunk_order']))
-        if not chunks:
-            empty += 1
+        chunks = []
+        for cid in ids[qi, :TOP_CHUNKS]:
+            record = records[cid]
+            for doc_id in docs_of(record, lookup):
+                chunks.append(dict(doc_id=doc_id, chunk_text=record['chunk_text'], chunk_order=record['chunk_order']))
+        relevant_docs = ranked_docs(ids[qi], records, lookup)[:doc_count]
+        # Doc scores are the max over chunks, so the submitted chunks' documents rank first; keep them listed
+        # even when one top chunk fans out to more documents than doc_count.
+        listed = set(relevant_docs)
+        for chunk in chunks:
+            if chunk['doc_id'] not in listed:
+                listed.add(chunk['doc_id'])
+                relevant_docs.append(chunk['doc_id'])
         submission.append(dict(id=int(query_id), relevant_docs=relevant_docs, relevant_chunks=chunks))
-    return submission, empty
+    return submission
 
 
 def validate(submission, queries, corpus_ids):
     assert len(submission) == 1200 and {row['id'] for row in submission} == set(map(int, queries['id'].tolist()))
     for entry in submission:
+        assert entry['relevant_chunks'], entry['id']
         assert set(entry['relevant_docs']).issubset(corpus_ids), entry['id']
+        assert len(set(entry['relevant_docs'])) == len(entry['relevant_docs']), entry['id']
         listed = set(entry['relevant_docs'])
         assert all(chunk['doc_id'] in listed and chunk['chunk_text'].strip() for chunk in entry['relevant_chunks'])
+
+
+def write_submission(submission, out, name):
+    json_path = out / f'{name}.json'
+    zip_path = out / f'{name}.zip'
+    json_path.write_text(json.dumps(submission, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(json_path, arcname=json_path.name)
+    with zipfile.ZipFile(zip_path) as archive:
+        assert archive.namelist() == [json_path.name]
+    docs = [len(entry['relevant_docs']) for entry in submission]
+    return dict(json=json_path.name, zip=zip_path.name, zip_bytes=zip_path.stat().st_size,
+                docs_per_query_min=min(docs), docs_per_query_median=float(np.median(docs)), docs_per_query_max=max(docs))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--out', type=Path, default=ROOT / 'artifacts' / 'submission')
+    parser.add_argument('--top-k', type=int, default=500, help='candidate chunks kept per query for document ranking')
+    parser.add_argument('--doc-counts', default='20,30,50,100', help='comma list of N, one submission per N')
     args = parser.parse_args()
+    doc_counts = [int(n) for n in args.doc_counts.split(',')]
     started = time.perf_counter()
     kaggle = ROOT / 'artifacts' / 'kaggle'
-    vector_roots = [kaggle / f'vectors-qwen3-4b-s{s}' / 'vectors' for s in range(3)]
-    vector_paths = sorted(path for root in vector_roots for path in root.glob('*.npy'))
+    vector_paths = sorted((path for s in range(3) for path in (kaggle / f'vectors-qwen3-4b-s{s}' / 'vectors').glob('*.npy')),
+                          key=lambda path: path.stem)
     assert len(vector_paths) == 9, 'expected 9 vector parts'
 
     query_vectors = np.load(kaggle / 'query-vectors-4b' / 'query_vectors.npy')
@@ -139,30 +191,28 @@ def main():
     assert json.loads((kaggle / 'query-vectors-4b' / 'query_ids.json').read_text()) == queries['id'].tolist()
     assert query_vectors.shape == (1200, 2560) and np.isfinite(query_vectors).all()
 
-    per_query = search(query_vectors, vector_paths)
+    args.out.mkdir(parents=True, exist_ok=True)
+    scores, parts, rows = load_or_search(args.out / f'candidates-4b-k{args.top_k}.npz', query_vectors, vector_paths, args.top_k)
     print('search done', round(time.perf_counter() - started, 1), 's', flush=True)
-    chunk_id_at = chunk_id_map(per_query, vector_roots)
-    wanted_ids = {cid for mapping in chunk_id_at.values() for cid in mapping.values()}
+    ids = chunk_ids(parts, rows, vector_paths)
     chunk_files = sorted((kaggle / 'chunk-corpus-v1' / 'chunks').glob('*/part-*.parquet'))
-    records = chunk_records(chunk_files, wanted_ids)
+    wanted_ids = set(ids.ravel().tolist())
+    records = chunk_records(chunk_files, wanted_ids, set(ids[:, :TOP_CHUNKS].ravel().tolist()))
     assert not wanted_ids - set(records), 'candidate chunks without source text'
     lookup = group_lookup(kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet')
-    submission, empty = build_submission(queries, per_query, chunk_id_at, records, lookup)
     corpus_ids = set(map(int, pd.read_parquet(ROOT / 'dataset' / 'links_corpus_vi_en_zh.parquet', columns=['id'])['id']))
-    validate(submission, queries, corpus_ids)
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    json_path = args.out / 'medxir-qwen3-4b-submission.json'
-    zip_path = args.out / 'medxir-qwen3-4b-submission.zip'
-    json_path.write_text(json.dumps(submission, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(json_path, arcname=json_path.name)
-    with zipfile.ZipFile(zip_path) as archive:
-        assert archive.namelist() == [json_path.name]
+    variants = {}
+    for doc_count in doc_counts:
+        submission = build_submission(queries, ids, records, lookup, doc_count)
+        validate(submission, queries, corpus_ids)
+        variants[doc_count] = write_submission(submission, args.out, f'medxir-qwen3-4b-d{doc_count}-submission')
+        print(f'd{doc_count}', variants[doc_count], flush=True)
     manifest = dict(
         model='Qwen/Qwen3-Embedding-4B', search='exact float32 matmul over stored float16 vectors, local CPU',
-        query_count=len(submission), top_chunks=TOP_CHUNKS, empty_queries=empty,
-        json_bytes=json_path.stat().st_size, zip_bytes=zip_path.stat().st_size,
+        query_count=len(queries), top_chunks=TOP_CHUNKS, candidate_top_k=args.top_k,
+        doc_ranking='max candidate chunk score per document, hash-group fan-out when fanout_safe',
+        variants={f'd{n}': v for n, v in variants.items()},
         elapsed_seconds=round(time.perf_counter() - started, 1),
     )
     (args.out / 'retrieval_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

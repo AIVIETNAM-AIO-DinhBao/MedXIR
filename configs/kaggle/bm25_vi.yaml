@@ -1,0 +1,14 @@
+# CPU job: BM25 over the Vietnamese chunks (scripts/bm25_vi.py). Output feeds scripts/fuse_dense_bm25.py.
+kernel:
+  id: boinhbo/medxir-bm25-vi
+  title: medxir bm25 vi
+  code_file: src/notebooks/kaggle_bm25_vi.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  kernel_sources: [boinhbo/medxir-chunk-corpus]
+  dataset_sources: [boinhbo/medxir-retrieval-inputs]
+  timeout_seconds: 7200
+  poll_interval_seconds: 60
+  fetch_files: [vi-candidates-k500.npz]
+  required_outputs: [vi-candidates-k500.npz]
