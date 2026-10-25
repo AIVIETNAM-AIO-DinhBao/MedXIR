@@ -517,7 +517,7 @@ Kiểm tra đầu ra đã xác nhận 9/9 index đọc được, dimension/metri
 
 **Lý do đổi khỏi FAISS:** index FAISS chỉ là bản sao của cùng vector float16. Runtime FAISS không có sẵn trên image RTX của Kaggle và gây lỗi import trong quá trình debug. Tìm bằng PyTorch cho cùng phép tính.
 
-**Dọn dẹp sau khi lần chạy xong:** xóa `boinhbo/medxir-faiss-qwen3-4b-fp32` và `boinhbo/medxir-retrieval-runtime` trên Kaggle. Bản local `artifacts/faiss/` vẫn giữ.
+**Dọn dẹp sau khi lần chạy xong:** xóa `boinhbo/medxir-faiss-qwen3-4b-fp32` và `boinhbo/medxir-retrieval-runtime` trên Kaggle. Bản local `artifacts/faiss/` đã xóa ngày 25/10 để giải phóng 26 GB; dựng lại bằng `scripts/build_faiss_flat_index.py` từ `artifacts/kaggle/vectors-qwen3-4b-s*`.
 
 **Cập nhật 25/10:** lần chạy encode trên Kaggle (`medxir-encode-queries-4b`) hoàn tất ở 495 giây, RSS đỉnh 5,7 GiB. Kernel tìm kiếm trên Kaggle (`medxir-retrieve-qwen3-4b`) chết ngay khi đọc file vector, không có log; probe `medxir-vector-read-probe` đọc đầy đủ một file vector cũng chết. Kết luận tạm: đọc file vector từ dataset mount trên Kaggle là điểm lỗi. Tìm kiếm chuyển sang máy local bằng `scripts/retrieve_local_4b.py` (CPU, float32, 141 giây). Bài nộp `artifacts/submission/medxir-qwen3-4b-submission.json` đủ 1.200 query, mỗi query 20 chunk, mọi `chunk_text` là nguyên văn. Đã nộp lên leaderboard, kết quả baseline 4B (chưa tune, `TOP_CHUNKS = 20`):
 
@@ -530,5 +530,24 @@ Kiểm tra đầu ra đã xác nhận 9/9 index đọc được, dimension/metri
 | Chunk Precision / Recall | 0,0978 / 0,0436 |
 
 So với bài #1 (BM25, FINAL_SCORE 0,019): khoảng gấp 4 lần. Recall document chỉ 0,12 nên phần lớn tài liệu đúng chưa được tìm thấy; precision chunk thấp hơn precision document nên nhiều chunk nộp không khớp đoạn tham chiếu.
+
+### Tách danh sách doc khỏi danh sách chunk, thêm BM25 — 25/10/2026
+
+`relevant_docs` và `relevant_chunks` được chấm độc lập, nên `scripts/retrieve_local_4b.py` giờ lưu top 500 chunk mỗi query (`artifacts/submission/candidates-4b-k500.npz`), xếp doc theo điểm chunk tốt nhất, rồi xuất N doc và C chunk tùy chọn (`--doc-counts`, `--chunk-counts`). Mọi bản bên dưới dùng cùng vector 4B; FINAL = trung bình Doc F2 và Chunk F2.
+
+| Bản nộp | Doc P / R | Chunk P / R | Doc F2 | Chunk F2 | FINAL |
+|---|---|---|---:|---:|---:|
+| Baseline (≈17 doc, 20 chunk) | 0,324 / 0,117 | 0,098 / 0,044 | 0,121 | 0,0422 | 0,0818 |
+| d50, 20 chunk | 0,240 / 0,242 | 0,098 / 0,044 | 0,207 | 0,0422 | 0,1245 |
+| d100, 20 chunk | 0,186 / 0,339 | 0,098 / 0,044 | 0,248 | 0,0422 | 0,1453 |
+| d200, 20 chunk | 0,134 / 0,445 | 0,098 / 0,044 | 0,261 | 0,0422 | 0,1517 |
+| d300, 20 chunk | 0,108 / 0,508 | 0,098 / 0,044 | 0,254 | 0,0422 | 0,1480 |
+| **d200, 100 chunk** | 0,134 / 0,445 | 0,074 / 0,134 | 0,261 | 0,0954 | **0,1783** |
+| RRF dense+BM25 (1:1) d100 / d200 | 0,174 / 0,325; 0,125 / 0,430 | 0,089 / 0,042 | 0,235; 0,247 | 0,0401 | 0,1377; 0,1433 |
+| Chỉ BM25 tiếng Việt, d200 | 0,086 / 0,299 | 0,055 / 0,025 | 0,172 | 0,0248 | 0,0982 |
+
+Nhận xét: số doc tối ưu quanh 200; tăng số chunk làm Chunk F2 tăng mạnh (precision chỉ giảm 0,098 → 0,074 khi chunk tăng 5 lần, recall tăng 3 lần), nên còn dư địa với 200–300 chunk. RRF 1:1 với BM25 làm điểm giảm; BM25 đứng riêng đạt 0,098 (chỉ phủ chunk tiếng Việt). Số chunk tham chiếu mỗi query ước tính khoảng 50, suy từ recall/precision.
+
+BM25 (`scripts/bm25_vi.py`, chạy trên Kaggle CPU bằng `configs/kaggle/bm25_vi.yaml`): âm tiết và cặp âm tiết liền kề, chuẩn hóa NFKC và vị trí dấu thanh, bỏ stopword và câu xã giao ở phía query, IDF/độ dài toàn corpus. Chạy BM25 trên máy local bị hết RAM hai lần; việc nặng chạy trên Kaggle (AGENT.md).
 
 **Mã nguồn:** [scripts/build_retrieval_notebook.py](scripts/build_retrieval_notebook.py), [src/notebooks/kaggle_retrieve_qwen3_4b.ipynb](src/notebooks/kaggle_retrieve_qwen3_4b.ipynb), [configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml](configs/kaggle/retrieve_qwen3_4b_rtx6000.yaml).
