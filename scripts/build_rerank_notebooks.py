@@ -103,7 +103,7 @@ OUT = Path('/kaggle/working')
 models_json = glob.glob('/kaggle/input/**/MODELS.json', recursive=True)
 cands_path = glob.glob('/kaggle/input/**/candidates.parquet', recursive=True)
 assert len(models_json) == 1 and len(cands_path) == 1, (models_json, cands_path)
-MODEL_ROOT = Path(models_json[0]).parent / 'models'
+MODEL_ROOT = Path(models_json[0]).parent  # MODELS.json sits in models/ next to the model folders
 manifest = json.load(open(models_json[0], encoding='utf-8'))['models']
 
 cands = pd.read_parquet(cands_path[0])
