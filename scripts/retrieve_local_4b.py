@@ -11,6 +11,10 @@ Inputs (local, read-only):
   artifacts/kaggle/chunk-corpus-v1/hash_groups.parquet                  duplicate-text groups
   dataset/query.parquet, dataset/links_corpus_vi_en_zh.parquet
 
+The vector .npy files were deleted locally on 25/10 (the ids parquet files stay). Candidates are cached in
+artifacts/submission/candidates-4b-k500.npz; a new search needs the vectors again, from the Kaggle datasets
+boinhbo/medxir-vectors-qwen3-4b-s0..s2 (13 GB, `kaggle datasets download`).
+
 Output (artifacts/submission/):
   candidates-4b-k<K>.npz                       cached top-K chunk candidates per query (reused on rerun)
   medxir-qwen3-4b-d<N>-submission.json, .zip   one submission per document count N
