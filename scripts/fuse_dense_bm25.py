@@ -42,11 +42,11 @@ def main():
     parser.add_argument('--bm25-file', type=Path, default=ROOT / 'artifacts' / 'bm25' / 'vi-candidates-k500.npz')
     parser.add_argument('--depth', type=int, default=500)
     parser.add_argument('--doc-counts', default='100,150,200')
+    parser.add_argument('--chunk-counts', default='20')
     parser.add_argument('--out', type=Path, default=ROOT / 'artifacts' / 'submission')
     args = parser.parse_args()
     kaggle = ROOT / 'artifacts' / 'kaggle'
-    vector_paths = sorted((p for s in range(3) for p in (kaggle / f'vectors-qwen3-4b-s{s}' / 'vectors').glob('*.npy')),
-                          key=lambda p: p.stem)
+    vector_paths = dense.part_paths(kaggle)
     queries = pd.read_parquet(ROOT / 'dataset' / 'query.parquet', columns=['id'])
     cached = np.load(args.out / 'candidates-4b-k500.npz')
     assert cached['keys'].tolist() == [p.stem for p in vector_paths]
@@ -55,16 +55,19 @@ def main():
     assert bm25['query_ids'].tolist() == queries['id'].tolist()
     ids = rrf(dense_ids, bm25['chunk_ids'], bm25['scores'], args.rrf_k, args.w_dense, args.w_bm25, args.depth)
 
+    chunk_counts = [int(x) for x in args.chunk_counts.split(',')]
     wanted = set(ids.ravel().tolist())
     chunk_files = sorted((kaggle / 'chunk-corpus-v1' / 'chunks').glob('*/part-*.parquet'))
-    records = dense.chunk_records(chunk_files, wanted, set(ids[:, :dense.TOP_CHUNKS].ravel().tolist()))
+    records = dense.chunk_records(chunk_files, wanted, set(ids[:, :max(chunk_counts)].ravel().tolist()))
     assert not wanted - set(records)
     lookup = dense.group_lookup(kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet')
     corpus_ids = set(map(int, pd.read_parquet(ROOT / 'dataset' / 'links_corpus_vi_en_zh.parquet', columns=['id'])['id']))
     for n in (int(x) for x in args.doc_counts.split(',')):
-        submission = dense.build_submission(queries, ids, records, lookup, n)
-        dense.validate(submission, queries, corpus_ids)
-        print(f'd{n}', dense.write_submission(submission, args.out, f'medxir-{args.tag}-d{n}-submission'), flush=True)
+        for c in chunk_counts:
+            submission = dense.build_submission(queries, ids, records, lookup, n, c)
+            dense.validate(submission, queries, corpus_ids)
+            name = f'd{n}' + ('' if c == dense.TOP_CHUNKS else f'-c{c}')
+            print(name, dense.write_submission(submission, args.out, f'medxir-{args.tag}-{name}-submission'), flush=True)
     top_overlap = np.mean([len(set(ids[i, :20]) & set(dense_ids[i, :20])) for i in range(len(ids))])
     print(json.dumps(dict(tag=args.tag, rrf_k=args.rrf_k, w_dense=args.w_dense, w_bm25=args.w_bm25,
                           mean_top20_overlap_with_dense=round(float(top_overlap), 2))))

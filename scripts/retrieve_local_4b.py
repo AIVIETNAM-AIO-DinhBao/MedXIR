@@ -43,6 +43,13 @@ TOP_CHUNKS = 20
 QUERY_BATCH = 200
 
 
+def part_paths(kaggle):
+    """The nine vector parts, named by their ids files so the list works without the .npy files."""
+    return sorted((path.with_name(path.name.removesuffix('-ids.parquet') + '.npy') for s in range(3)
+                   for path in (kaggle / f'vectors-qwen3-4b-s{s}' / 'vectors').glob('*-ids.parquet')),
+                  key=lambda path: path.stem)
+
+
 def search(query_vectors, vector_paths, top_k):
     """Return (scores, part_index, rows), each shaped (queries, top_k), sorted by score descending."""
     n = len(query_vectors)
@@ -134,11 +141,11 @@ def ranked_docs(query_ids, records, lookup):
     return ranked
 
 
-def build_submission(queries, ids, records, lookup, doc_count):
+def build_submission(queries, ids, records, lookup, doc_count, chunk_count=TOP_CHUNKS):
     submission = []
     for qi, query_id in enumerate(queries['id'].tolist()):
         chunks = []
-        for cid in ids[qi, :TOP_CHUNKS]:
+        for cid in ids[qi, :chunk_count]:
             record = records[cid]
             for doc_id in docs_of(record, lookup):
                 chunks.append(dict(doc_id=doc_id, chunk_text=record['chunk_text'], chunk_order=record['chunk_order']))
@@ -167,13 +174,15 @@ def validate(submission, queries, corpus_ids):
 def write_submission(submission, out, name):
     json_path = out / f'{name}.json'
     zip_path = out / f'{name}.zip'
-    json_path.write_text(json.dumps(submission, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    json_path.write_text(json.dumps(submission, ensure_ascii=False) + '\n', encoding='utf-8')
     with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(json_path, arcname=json_path.name)
     with zipfile.ZipFile(zip_path) as archive:
         assert archive.namelist() == [json_path.name]
     docs = [len(entry['relevant_docs']) for entry in submission]
-    return dict(json=json_path.name, zip=zip_path.name, zip_bytes=zip_path.stat().st_size,
+    chunks = [len(entry['relevant_chunks']) for entry in submission]
+    json_path.unlink()  # the ZIP is what gets submitted; saves disk
+    return dict(chunks_per_query_median=float(np.median(chunks)), zip=zip_path.name, zip_bytes=zip_path.stat().st_size,
                 docs_per_query_min=min(docs), docs_per_query_median=float(np.median(docs)), docs_per_query_max=max(docs))
 
 
@@ -182,12 +191,13 @@ def main():
     parser.add_argument('--out', type=Path, default=ROOT / 'artifacts' / 'submission')
     parser.add_argument('--top-k', type=int, default=500, help='candidate chunks kept per query for document ranking')
     parser.add_argument('--doc-counts', default='20,30,50,100', help='comma list of N, one submission per N')
+    parser.add_argument('--chunk-counts', default='20', help='comma list of submitted chunks per query')
     args = parser.parse_args()
     doc_counts = [int(n) for n in args.doc_counts.split(',')]
+    chunk_counts = [int(n) for n in args.chunk_counts.split(',')]
     started = time.perf_counter()
     kaggle = ROOT / 'artifacts' / 'kaggle'
-    vector_paths = sorted((path for s in range(3) for path in (kaggle / f'vectors-qwen3-4b-s{s}' / 'vectors').glob('*.npy')),
-                          key=lambda path: path.stem)
+    vector_paths = part_paths(kaggle)
     assert len(vector_paths) == 9, 'expected 9 vector parts'
 
     query_vectors = np.load(kaggle / 'query-vectors-4b' / 'query_vectors.npy')
@@ -201,22 +211,24 @@ def main():
     ids = chunk_ids(parts, rows, vector_paths)
     chunk_files = sorted((kaggle / 'chunk-corpus-v1' / 'chunks').glob('*/part-*.parquet'))
     wanted_ids = set(ids.ravel().tolist())
-    records = chunk_records(chunk_files, wanted_ids, set(ids[:, :TOP_CHUNKS].ravel().tolist()))
+    records = chunk_records(chunk_files, wanted_ids, set(ids[:, :max(chunk_counts)].ravel().tolist()))
     assert not wanted_ids - set(records), 'candidate chunks without source text'
     lookup = group_lookup(kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet')
     corpus_ids = set(map(int, pd.read_parquet(ROOT / 'dataset' / 'links_corpus_vi_en_zh.parquet', columns=['id'])['id']))
 
     variants = {}
     for doc_count in doc_counts:
-        submission = build_submission(queries, ids, records, lookup, doc_count)
-        validate(submission, queries, corpus_ids)
-        variants[doc_count] = write_submission(submission, args.out, f'medxir-qwen3-4b-d{doc_count}-submission')
-        print(f'd{doc_count}', variants[doc_count], flush=True)
+        for chunk_count in chunk_counts:
+            submission = build_submission(queries, ids, records, lookup, doc_count, chunk_count)
+            validate(submission, queries, corpus_ids)
+            name = f'd{doc_count}' + ('' if chunk_count == TOP_CHUNKS else f'-c{chunk_count}')
+            variants[name] = write_submission(submission, args.out, f'medxir-qwen3-4b-{name}-submission')
+            print(name, variants[name], flush=True)
     manifest = dict(
         model='Qwen/Qwen3-Embedding-4B', search='exact float32 matmul over stored float16 vectors, local CPU',
         query_count=len(queries), top_chunks=TOP_CHUNKS, candidate_top_k=args.top_k,
         doc_ranking='max candidate chunk score per document, hash-group fan-out when fanout_safe',
-        variants={f'd{n}': v for n, v in variants.items()},
+        variants=variants,
         elapsed_seconds=round(time.perf_counter() - started, 1),
     )
     (args.out / 'retrieval_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
