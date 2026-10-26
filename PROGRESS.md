@@ -625,3 +625,5 @@ Bài nộp (dựng bằng `scripts/build_rerank_submission.py`, 150 chunk đã s
 - `medxir-rr4b-f10-d200-c150-submission.zip` (89 MB): 4B + dense, trọng số dense 1,0.
 
 Thứ tự nộp đề xuất: rr4b → rr06b → rrbge → rr4b-f05 tùy kết quả trước đó. Mốc hiện tại: d200-c150 dense, FINAL 0,1847.
+
+**Đính chính (27/10):** Các bài `rr4b`, `rr06b`, `rrbge` và `rr4b-f*` không đổi điểm so với dense, vì chúng chỉ đổi thứ tự 150 chunk đã có. Điểm chunk và doc đều theo tập hợp nên không đổi. Kiểm tra: 1.200/1.200 query có cùng tập chunk và cùng tập doc với bản d200-c150 dense. Reranker chỉ có tác dụng khi chọn 150 chunk từ một pool lớn hơn (top-500), không phải khi sắp lại top-150. Cần chạy lại 600.000 cặp (1.200 × 500) cho mỗi model.
