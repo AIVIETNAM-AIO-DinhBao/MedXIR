@@ -33,8 +33,7 @@ REPOS = [
     'Qwen/Qwen3-Reranker-0.6B',
     'Qwen/Qwen3-Reranker-4B',
     'BAAI/bge-reranker-v2-m3',
-    'jinaai/jina-reranker-v3.5',
-]
+]  # Jina v3.5 is CC-BY-NC-4.0 and as costly as the 4B: left out until BTC confirms the license
 OUT = '/kaggle/working/models'
 LIMIT_GB = 20
 ALLOW = ['*.json', '*.safetensors', '*.txt', '*.md', 'merges.txt', '*.py']
@@ -82,7 +81,7 @@ Input: dataset `boinhbo/medxir-rerank-candidates` (candidates.parquet) and the p
 `boinhbo/medxir-package-rerankers`. No internet. Output: `rerank_benchmark.json`, one `scores_<name>.parquet`
 per model (query_id, rank, score).
 
-Set `QUERY_LIMIT` to 100 for a speed and memory check; use 0 for all 1,200 queries.
+Default `QUERY_LIMIT` is 0 (all 1,200 queries). Set it to 100 for a quick speed check.
 """),
     ('code', """
 import glob
@@ -95,7 +94,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-QUERY_LIMIT = int(os.environ.get('QUERY_LIMIT', '100'))
+QUERY_LIMIT = int(os.environ.get('QUERY_LIMIT', '0'))  # 0 = all queries
 MAX_LEN = 1024
 BATCH = 16
 OUT = Path('/kaggle/working')
@@ -181,7 +180,6 @@ SCORERS = {
     'Qwen3-Reranker-0.6B': score_qwen,
     'Qwen3-Reranker-4B': score_qwen,
     'bge-reranker-v2-m3': score_seqcls,
-    'jina-reranker-v3.5': score_jina,
 }
 """),
     ('code', """
