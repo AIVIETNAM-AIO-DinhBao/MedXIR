@@ -604,3 +604,24 @@ Chạy benchmark (exp_0004, 100 query = 15.000 cặp, top-150 dense):
 Đo đồng thuận (không phải chất lượng, vì chưa có nhãn): hai model cho xếp hạng tương quan Spearman trung bình 0,51 và trùng 8,6/20 chunk đầu.
 
 Cần làm: chạy lại trên RTX Pro 6000 chọn trong giao diện Kaggle (không qua CLI); dùng fp16 khi GPU không hỗ trợ bf16; thêm kiểm tra tên GPU trong notebook; chỉ dùng được Qwen3-4B và bge trên GPU lớn hơn.
+
+### Rerank toàn bộ 1.200 query trên RTX Pro 6000 — 27/10/2026
+
+Chạy `exp_0006` (NVIDIA RTX PRO 6000 Blackwell, bf16, Internet OFF, có cuộc thi ARC AGI 3 gắn vào). 180.000 cặp (1.200 query × top-150 dense) cho mỗi model. Kết quả lưu ở `artifacts/rerank/results/full/`.
+
+| Model | Thời gian | Cặp/giây | VRAM đỉnh |
+|---|---:|---:|---:|
+| bge-reranker-v2-m3 | 339 s | 532 | 1,5 GB |
+| Qwen3-Reranker-0.6B | 1.140 s | 158 | 13,1 GB |
+| Qwen3-Reranker-4B | 4.750 s | 38 | 20,6 GB |
+
+Jina v3.5 không chạy (CC-BY-NC-4.0, chờ BTC xác nhận).
+
+Bài nộp (dựng bằng `scripts/build_rerank_submission.py`, 150 chunk đã sắp lại theo điểm rerank, 200 doc). Danh sách doc lấy thêm các ứng viên dense hạng 150 trở đi (không rerank) để đủ 200 doc như các bản d200 trước:
+- `medxir-rr4b-d200-c150-submission.zip` (89 MB): Qwen3-4B, chỉ rerank.
+- `medxir-rr06b-d200-c150-submission.zip` (89 MB): Qwen3-0.6B.
+- `medxir-rrbge-d200-c150-submission.zip` (88 MB): bge-m3.
+- `medxir-rr4b-f05-d200-c150-submission.zip` (89 MB): 4B + dense, trọng số dense 0,5.
+- `medxir-rr4b-f10-d200-c150-submission.zip` (89 MB): 4B + dense, trọng số dense 1,0.
+
+Thứ tự nộp đề xuất: rr4b → rr06b → rrbge → rr4b-f05 tùy kết quả trước đó. Mốc hiện tại: d200-c150 dense, FINAL 0,1847.

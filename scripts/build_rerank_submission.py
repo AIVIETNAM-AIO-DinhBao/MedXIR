@@ -15,7 +15,8 @@ import pandas as pd
 import retrieve_local_4b as dense
 
 ROOT = Path(__file__).resolve().parent.parent
-RESULTS = ROOT / 'artifacts' / 'rerank' / 'results'
+RESULTS = ROOT / 'artifacts' / 'rerank' / 'results' / 'full'
+TOP = 150
 
 
 def z(values):
@@ -46,14 +47,22 @@ def main():
     order = np.argsort(-fused, axis=1, kind='stable')
     ids = np.take_along_axis(chunk_ids, order, axis=1)
 
+    # Document list: the reranked 150 first, then the dense candidates from rank 150 on (not reranked), so that
+    # --docs can be filled as in the dense runs. Chunks still come only from the 150 reranked ones.
     kaggle = ROOT / 'artifacts' / 'kaggle'
+    vector_paths = dense.part_paths(kaggle)
+    cached = np.load(ROOT / 'artifacts' / 'submission' / 'candidates-4b-k500.npz')
+    assert cached['keys'].tolist() == [p.stem for p in vector_paths]
+    tail_ids = dense.chunk_ids(cached['parts'][:, TOP:], cached['rows'][:, TOP:], vector_paths)
+    ids_all = np.concatenate([ids, tail_ids], axis=1)
     chunk_files = sorted((kaggle / 'chunk-corpus-v1' / 'chunks').glob('*/part-*.parquet'))
-    records = dense.chunk_records(chunk_files, set(ids.ravel().tolist()), set(ids.ravel().tolist()))
-    assert not set(ids.ravel().tolist()) - set(records), 'candidate chunks without source text'
+    wanted = set(ids_all.ravel().tolist())
+    records = dense.chunk_records(chunk_files, wanted, set(ids.ravel().tolist()))
+    assert not wanted - set(records), 'candidate chunks without source text'
     lookup = dense.group_lookup(kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet')
     corpus_ids = set(map(int, pd.read_parquet(ROOT / 'dataset' / 'links_corpus_vi_en_zh.parquet', columns=['id'])['id']))
     queries_frame = pd.read_parquet(ROOT / 'dataset' / 'query.parquet', columns=['id'])
-    submission = dense.build_submission(queries_frame, ids, records, lookup, args.docs, ids.shape[1])
+    submission = dense.build_submission(queries_frame, ids_all, records, lookup, args.docs, ids.shape[1])
     dense.validate(submission, queries_frame, corpus_ids)
     name = f'{args.tag}-d{args.docs}-c{ids.shape[1]}'
     print(name, dense.write_submission(submission, args.out, f'medxir-{name}-submission'), flush=True)
