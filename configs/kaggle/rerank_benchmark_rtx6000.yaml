@@ -1,4 +1,5 @@
 # RTX Pro 6000, Internet OFF: rerankers come from the offline package kernel; candidates from the dataset.
+# The RTX Pro 6000 option is offered only with the competition attached (competition_sources) and Internet OFF.
 # Set QUERY_LIMIT in the notebook (default 100 = speed check; 0 = all 1,200 queries).
 kernel:
   id: boinhbo/medxir-rerank-benchmark-rtx6000
@@ -9,6 +10,7 @@ kernel:
   enable_internet: false
   machine_shape: NvidiaRtxPro6000
   expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
   dataset_sources: [boinhbo/medxir-rerank-candidates]
   kernel_sources: [boinhbo/medxir-package-rerankers]
   timeout_seconds: 21600

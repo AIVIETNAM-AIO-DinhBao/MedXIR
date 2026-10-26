@@ -111,7 +111,13 @@ if QUERY_LIMIT:
     keep = sorted(cands['query_id'].unique())[:QUERY_LIMIT]
     cands = cands[cands['query_id'].isin(keep)]
 print('rows', len(cands), 'queries', cands['query_id'].nunique(), flush=True)
-print('gpu', torch.cuda.get_device_name(0), flush=True)
+GPU = torch.cuda.get_device_name(0)
+print('gpu', GPU, flush=True)
+# Fail fast on the wrong hardware (the CLI can silently pick a T4); set ALLOW_ANY_GPU=1 to bypass.
+assert '6000' in GPU or os.environ.get('ALLOW_ANY_GPU') == '1', f'expected RTX Pro 6000, got {GPU}'
+# T4 has no bf16; use fp16 there (the RTX Pro 6000 keeps bf16).
+DTYPE = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+print('dtype', DTYPE, flush=True)
 """),
     ('code', """
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -126,7 +132,7 @@ def score_qwen(model_dir, pairs):
     from transformers import AutoModelForCausalLM
     tok = AutoTokenizer.from_pretrained(model_dir, padding_side='left')
     # Qwen3-Reranker is a causal LM: score = P(yes) vs P(no) at the last position (model card).
-    model = AutoModelForCausalLM.from_pretrained(model_dir, torch_dtype=torch.bfloat16).cuda().eval()
+    model = AutoModelForCausalLM.from_pretrained(model_dir, torch_dtype=DTYPE).cuda().eval()
     yes, no = tok.convert_tokens_to_ids('yes'), tok.convert_tokens_to_ids('no')
     texts = [QWEN_PREFIX + f'<Instruct>: {INSTRUCT}\\n<Query>: {q}\\n<Document>: {d}' + QWEN_SUFFIX for q, d in pairs]
     out = np.empty(len(texts), dtype=np.float32)
@@ -143,7 +149,7 @@ def score_qwen(model_dir, pairs):
 
 def score_seqcls(model_dir, pairs):
     tok = AutoTokenizer.from_pretrained(model_dir)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir, torch_dtype=torch.bfloat16).cuda().eval()
+    model = AutoModelForSequenceClassification.from_pretrained(model_dir, torch_dtype=DTYPE).cuda().eval()
     out = np.empty(len(pairs), dtype=np.float32)
     order = np.argsort([len(d) for _, d in pairs])
     for start in range(0, len(pairs), BATCH):
@@ -158,7 +164,7 @@ def score_seqcls(model_dir, pairs):
 def score_jina(model_dir, pairs):
     # Listwise: all candidates for one query in one context (model card). Returns per-query scores.
     from transformers import AutoModel
-    model = AutoModel.from_pretrained(model_dir, torch_dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
+    model = AutoModel.from_pretrained(model_dir, torch_dtype=DTYPE, trust_remote_code=True).cuda().eval()
     out = np.empty(len(pairs), dtype=np.float32)
     by_query = {}
     for i, (q, d) in enumerate(pairs):
