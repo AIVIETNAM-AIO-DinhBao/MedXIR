@@ -589,3 +589,18 @@ Ghi chú: file `medxir-qwen3-4b-d200-c100-submission.zip` được tạo lại b
 **Kết quả d200-c150 (đã nộp):** FINAL 0,1847; Doc F2 0,2612; Chunk F2 0,1081 (P 0,0665, R 0,1696).
 
 Xu hướng Chunk F2 theo số chunk/query (cùng 200 doc): 20 → 0,042; 100 → 0,095; 150 → 0,108. Mỗi 50 chunk thêm tăng ít dần (+0,013 ở 100→150), trong khi precision giảm. Chunk tiếp theo bị giới hạn 100 MB chặn lại. Các cải thiện tiếp theo cần đến từ thứ tự xếp hạng (reranker, hybrid), không chỉ từ số lượng.
+
+### Benchmark reranker đa ngôn ngữ — 26/10/2026 (chưa hoàn tất)
+
+Gói model (`boinhbo/medxir-package-rerankers`, exp_0002, 12,8 GB): Qwen3-Reranker-0.6B (Apache-2.0, 2025-05-29), Qwen3-Reranker-4B (Apache-2.0, 2025-06-03), bge-reranker-v2-m3 (Apache-2.0, 2024-03-15), jina-reranker-v3.5 (CC-BY-NC-4.0, 2026-07-14, không thương mại; cần xác nhận quy định cuộc thi).
+
+Chạy benchmark (exp_0004, 100 query = 15.000 cặp, top-150 dense):
+- Phần cứng thực tế là **Tesla T4**, không phải RTX Pro 6000. Config yêu cầu `NvidiaRtxPro6000` nhưng CLI không áp dụng được; notebook không kiểm tra GPU nên không báo lỗi.
+- Qwen3-Reranker-0.6B: chạy được, nhưng 2,1 cặp/giây (bf16 không có trên T4). Với 180.000 cặp của 1.200 query là khoảng 24 giờ.
+- bge-reranker-v2-m3: chạy được, 4,4 cặp/giây, VRAM 3,5 GB.
+- Qwen3-Reranker-4B: hết VRAM trên T4 (14,5 GB).
+- jina-reranker-v3.5 (listwise, 150 tài liệu một ngữ cảnh): hết VRAM, cần kiến trúc chia nhỏ hoặc GPU lớn hơn.
+
+Đo đồng thuận (không phải chất lượng, vì chưa có nhãn): hai model cho xếp hạng tương quan Spearman trung bình 0,51 và trùng 8,6/20 chunk đầu.
+
+Cần làm: chạy lại trên RTX Pro 6000 chọn trong giao diện Kaggle (không qua CLI); dùng fp16 khi GPU không hỗ trợ bf16; thêm kiểm tra tên GPU trong notebook; chỉ dùng được Qwen3-4B và bge trên GPU lớn hơn.
