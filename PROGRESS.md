@@ -1,8 +1,93 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 23/10/2026 (UTC+07:00).
+**Cập nhật:** 26/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
 
-**Giai đoạn hiện tại:** corpus v1 và vectors 0.6B/4B đã hoàn tất. Đã xác minh phép nối 4B từ hàng vector qua `chunk_id` tới chunk gốc và `hash_groups`. Retrieval 4B chạy tìm kiếm chính xác trực tiếp trên vector đã lưu, không dùng FAISS (xem mục 16). Đang chạy lần retrieval đầu tiên trên Kaggle. BM25 được hoãn tới khi chốt tokenizer riêng cho EN/VI/ZH.
+## Bàn giao
+
+### 1. Trạng thái
+
+- **Điểm tốt nhất trên leaderboard: FINAL 0,1847** (`d200-c150`: dense Qwen3-Embedding-4B; 150 chunk là top-150 dense, 200 doc lấy từ top-500 dense).
+- Lịch sử điểm chính: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847.
+- Reranker **không** cải thiện gì: các bài rerank đã nộp (`rr*`) có cùng tập chunk và tập doc với dense nên điểm bằng hệt (xem đính chính cuối PROGRESS). Không cần nộp lại các bài này.
+- Nhiều lượt nộp trong ngày đã bị dùng cho các bài rerank vô ích. Quota: 10 lượt/ngày; số lượt còn lại hôm nay do bạn xác nhận.
+- Không có job Kaggle nào đang chạy. Không có nhãn cục bộ, nên mọi thay đổi chỉ đo được qua leaderboard.
+
+### 2. Metric (quan trọng cho mọi quyết định)
+
+- FINAL = trung bình (Doc F2 macro, Chunk F2 macro). Ví dụ d200-c150: (0,2612 + 0,1081) / 2 = 0,1847.
+- Chunk đúng nếu LCS token ≥ 40% đoạn tham chiếu, cùng `doc_id`. Chia cho độ dài đoạn tham chiếu, không phải đoạn nộp.
+- **Điểm chỉ phụ thuộc tập hợp, không phụ thuộc thứ tự.** Sắp lại chunk hay doc không làm đổi điểm. Chỉ thay đổi tập chunk/doc mới có tác động.
+- Doc F2 đạt đỉnh quanh 200 doc. Chunk F2 tăng theo số chunk nhưng giảm dần: 20 → 0,042; 100 → 0,095; 150 → 0,108.
+- Giới hạn dashboard: file nộp tối đa 100 MB. Với chunk text nguyên văn, khoảng 150 chunk/query là tối đa. c200 nặng 121 MB, không nộp được.
+
+### 3. Dữ liệu
+
+- **Corpus chính thức:** `dataset/links_corpus_vi_en_zh.parquet`, 1.220.598 ID, id và url khớp kế hoạch recrawl 100%.
+- **Corpus v1** (`artifacts/corpus_v1/{en,vi,zh}.parquet`): 1.027.516 ID, đều nằm trong parquet, url khớp 100%. Đây là nền cho chunk và embedding hiện tại. Phủ 97,2% ID không thuộc nguồn bị chặn (chặn: 120ask, familydoctor.com.cn, zysjonline, iiyi, laodong; BTC xác nhận không tính).
+- Pending 26.179 ID (suckhoedoisong, longchau theo quota), lỗi 3.628 ID. Không tái crawl.
+- **Chưa nhập vào corpus:** `artifacts/corpus_v1_patch/crawl_gap_v1_1.jsonl` (140 tài liệu, đã kiểm tra url) và 4.753 tài liệu VI từ 7 batch sau khi build v1 (cần lọc nguồn bị chặn). Nhập sẽ kéo theo chunk và embed mới.
+- **ZH parser v2.3:** khoảng 72k tài liệu cần reparse lên v2.4+. Chưa đo tác động. Hoãn.
+- Đã xóa: `artifacts/crawl/`, `artifacts/crawl_full/`, `artifacts/readiness_check/`, `.work/` (debug). Giữ: `artifacts/recrawl_20261015/` (state.sqlite là checkpoint resume; cc_v1 4,7 GB và pharmacity_v1 772 MB chỉ có ở local, chưa upload).
+- Drive: `gdrive:` dùng `--drive-root-folder-id 1tfvL8OJIRejT_c-4wfaQnTZecT67qJld`. Có batch recrawl vi/en/zh và wayback_v1 (đã xác minh). Các batch crawl pilot và crawl_full không có trên Drive.
+
+### 4. Vector, chunk, BM25
+
+- Chunk: `artifacts/kaggle/chunk-corpus-v1/chunks/{en,vi,zh}/part-*.parquet`, `hash_groups.parquet`. Chunk 350/50/40, chunk ID = `text_sha256[:16]-order`.
+- Vector 4B: 9 part trên Kaggle `boinhbo/medxir-vectors-qwen3-4b-s0..s2` (13 GB). Bản `.npy` local đã xóa; còn `ids.parquet` và `artifacts/submission/candidates-4b-k500.npz` (top-500 dense cho 1.200 query, cache để chạy lại không cần GPU).
+- Query vector 4B: `artifacts/kaggle/query-vectors-4b/`.
+- BM25 tiếng Việt: `artifacts/bm25/vi-candidates-k500.npz` (top-500 cho 1.200 query, kết quả Kaggle `boinhbo/medxir-bm25-vi`, `scripts/bm25_vi.py`). BM25 đứng riêng đạt 0,098; RRF 1:1 làm giảm điểm (0,1433 so với 0,1517).
+
+### 5. Script chính
+
+- `scripts/retrieve_local_4b.py`: tạo bài nộp dense. Tham số `--doc-counts`, `--chunk-counts`; nén zip mức 9, JSON gọn.
+- `scripts/fuse_dense_bm25.py`: RRF dense + BM25 (`--w-dense`, `--w-bm25`, `--doc-counts`, `--chunk-counts`).
+- `scripts/build_rerank_submission.py`, `scripts/build_rerank_candidates.py`, `scripts/build_rerank_notebooks.py`: nhánh reranker, đã dừng.
+- `scripts/bm25_vi.py`: BM25 tiếng Việt (chạy trên Kaggle CPU, không chạy local vì OOM).
+
+### 6. Kaggle
+
+- Mọi job nặng chạy trên Kaggle qua `uv run python -m tools.kaggle kernel run --config configs/kaggle/<job>.yaml --source . --account boinhbo`. Internet tắt cho RTX Pro 6000.
+- **Để chọn RTX Pro 6000:** `competition_sources: [arc-prize-2026-arc-agi-3]` và Internet tắt. Thiếu `competition_sources` thì CLI có thể cấp Tesla T4 mà không báo lỗi. Notebook nên kiểm tra tên GPU (đã có ở `kaggle_rerank_benchmark`).
+- `kaggle kernels output/status/logs` chỉ đọc version mới nhất. Khi có nhiều version, dùng giao diện web để lấy output của version cụ thể.
+- Notebook đã dùng: `kaggle_chunk_corpus`, `kaggle_encode_queries_4b`, `kaggle_search_4b` (không chạy được do lỗi đọc vector, đã thay bằng tìm kiếm local), `kaggle_bm25_vi`, `kaggle_rerank_benchmark`, `kaggle_package_rerankers`.
+
+### 7. Quy tắc làm việc
+
+- Việc nặng (lập chỉ mục, BM25, tìm kiếm toàn bộ vector, rerank) chạy trên Kaggle, không chạy local. Lý do: 25/10 BM25 local bị OOM hai lần.
+- Không nộp leaderboard khi chưa có bằng chứng bài mới khác tập chunk/doc. Hỏi bạn trước khi dùng lượt nộp.
+- Không rerank hay chạy GPU nếu chưa có kế hoạch cụ thể.
+- Không dùng VPN, xoay IP, hay vượt chặn nguồn (AGENT.md, memory `respect-site-blocks`).
+
+### 8. Hướng tiếp theo: tăng cường retrieval (chưa làm)
+
+Các bước dưới đây chỉ dùng cache local (top-500 dense và BM25), không cần GPU:
+
+1. **Chọn 150 chunk trong pool top-500** bằng điểm kết hợp (dense + BM25 với trọng số thấp hơn 1:1), thay vì lấy top-150 dense. Đây là thay đổi tập chunk thật sự nên có thể đổi điểm.
+2. **Tổng hợp điểm doc:** thử max, tổng top-k, hoặc số chunk trong doc, thay vì chỉ max. Đo qua leaderboard, mỗi lượt một biến.
+3. **Trọng số BM25:** `rrf03-d200` đã có (chưa nộp), thử tiếp 0,1–0,3 kèm chọn 150 chunk theo điểm kết hợp.
+4. **Chặn doc tĩnh:** loại doc thuộc nhóm trùng hash quá lớn hoặc các trang điều hướng wiki (`wiki_tail_requires_review`), nếu chúng chiếm slot trong top-150.
+5. Các hướng cần GPU (query rewrite, query đa ngôn ngữ, embed lại): để sau, sau khi cạn các bước trên.
+
+Mỗi bước: tạo bài nộp, kiểm tra tập chunk/doc khác dense (không chỉ thứ tự), rồi hỏi bạn trước khi nộp.
+
+### 9. Bài nộp hiện có (`artifacts/submission/`)
+
+| File | Đã nộp | Điểm | Ghi chú |
+|---|---|---:|---|
+| d200-c150 (`medxir-qwen3-4b-d200-c150-submission.zip`) | Có | 0,1847 | Mốc tốt nhất |
+| d200-c100 | Có | 0,1783 | |
+| d200 / d100 / d50 / d300 / d150 (`d150` chưa nộp) | Có (trừ d150) | | Dense |
+| rrf-d100, rrf-d200, bm25only-d200 | Có | 0,1377 / 0,1433 / 0,0982 | |
+| rrf03-d200 | Chưa nộp | | Trọng số BM25 0,3 |
+| bm25only-d100 | Chưa nộp | | |
+| d200-c50 | Chưa nộp | | |
+| rr06b / rr4b / rrbge / rr4b-f05 / rr4b-f10 (d200-c150) | Không nộp | | Trùng tập với dense, không có giá trị |
+
+Ghi chú: c200 và c300 không nộp được vì vượt 100 MB.
+
+---
+
+## Nhật ký chi tiết
 
 Tài liệu này ghi kết quả đã thu được. Các bước thiết kế chưa triển khai được đánh dấu riêng; hướng giải quyết tổng thể nằm trong [PROPOSED_SOLUTION.md](PROPOSED_SOLUTION.md).
 
@@ -605,7 +690,7 @@ Chạy benchmark (exp_0004, 100 query = 15.000 cặp, top-150 dense):
 
 Cần làm: chạy lại trên RTX Pro 6000 chọn trong giao diện Kaggle (không qua CLI); dùng fp16 khi GPU không hỗ trợ bf16; thêm kiểm tra tên GPU trong notebook; chỉ dùng được Qwen3-4B và bge trên GPU lớn hơn.
 
-### Rerank toàn bộ 1.200 query trên RTX Pro 6000 — 27/10/2026
+### Rerank toàn bộ 1.200 query trên RTX Pro 6000 — 26/10/2026
 
 Chạy `exp_0006` (NVIDIA RTX PRO 6000 Blackwell, bf16, Internet OFF, có cuộc thi ARC AGI 3 gắn vào). 180.000 cặp (1.200 query × top-150 dense) cho mỗi model. Kết quả lưu ở `artifacts/rerank/results/full/`.
 
@@ -626,4 +711,4 @@ Bài nộp (dựng bằng `scripts/build_rerank_submission.py`, 150 chunk đã s
 
 Thứ tự nộp đề xuất: rr4b → rr06b → rrbge → rr4b-f05 tùy kết quả trước đó. Mốc hiện tại: d200-c150 dense, FINAL 0,1847.
 
-**Đính chính (27/10):** Các bài `rr4b`, `rr06b`, `rrbge` và `rr4b-f*` không đổi điểm so với dense, vì chúng chỉ đổi thứ tự 150 chunk đã có. Điểm chunk và doc đều theo tập hợp nên không đổi. Kiểm tra: 1.200/1.200 query có cùng tập chunk và cùng tập doc với bản d200-c150 dense. Reranker chỉ có tác dụng khi chọn 150 chunk từ một pool lớn hơn (top-500), không phải khi sắp lại top-150. Cần chạy lại 600.000 cặp (1.200 × 500) cho mỗi model.
+**Đính chính (26/10):** Các bài `rr4b`, `rr06b`, `rrbge` và `rr4b-f*` không đổi điểm so với dense, vì chúng chỉ đổi thứ tự 150 chunk đã có. Điểm chunk và doc đều theo tập hợp nên không đổi. Kiểm tra: 1.200/1.200 query có cùng tập chunk và cùng tập doc với bản d200-c150 dense. Reranker chỉ có tác dụng khi chọn 150 chunk từ một pool lớn hơn (top-500), không phải khi sắp lại top-150. Cần chạy lại 600.000 cặp (1.200 × 500) cho mỗi model.
