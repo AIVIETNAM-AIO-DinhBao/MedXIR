@@ -8,7 +8,7 @@
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,2509** (`v2 Qwen3-8B nb60-d200-drr-bge-only`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2539** (`v2 fusion 4B 0,35 · Qwen3-8B 0,35 · Octen-8B 0,30 nb60-d200-drr-bge-only`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
 - Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437 → v2 nb60-d200-drr-bge-only 0,2464 → ghigh 0,2477.
 - Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444.
 - **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
@@ -772,6 +772,7 @@ Chạy Kaggle CPU, input `medxir-chunk-corpus` + output hybrid (`pool.parquet` v
 | v2 nb60-drr-bge-only-glow (global-low: byte của query tự tin chuyển sang query ít chunk điểm bge ≥ 0,5, γ 0,5) | 0,2352 | 0,530 | 0,249 | 0,173 | Chunk P tăng nhưng Chunk F2 macro giảm 0,1886 → 0,1676: query tự tin mất recall (F2 cao, mất nhiều), query yếu thêm chunk gần như không thêm F2 (P thấp chặn F2). Bỏ hướng nhường chỗ cho query yếu |
 | **v2 nb60-drr-bge-only-ghigh** (ngược lại: byte dồn cho query tự tin, γ −0,5) | **0,2477** | 0,530 | 0,234 | 0,159 | Mốc tốt nhất. Chunk F2 0,1886 → 0,1908: R giảm 0,015 nhưng P tăng, F2 macro tăng vì query mạnh được thêm recall. Tiếp: γ −1,0 |
 | **v2 Qwen3-8B hybrid nb60-d200-drr-bge-only** (`R2/submission/qwen8b/`, model đơn, BM25 v2) | **0,2509** | 0,544 | 0,2509 | 0,155 | Mốc tốt nhất. So với 4B: Doc R +0,014, Doc F2 0,3131; Chunk R gần như không đổi → chunk recall bị giới hạn ở cách chọn đoạn. Hạng 100–200 của danh sách doc chỉ 10% có đoạn được nộp, hạng 50–100 48%: biến thể `cover` |
+| **v2 fusion 4B 0,35 · Qwen3-8B 0,35 · Octen-8B 0,30 nb60-d200-drr-bge-only** (`R2/submission/fusion-35-35-30/`, BM25 v2, pool 600) | **0,2539** | 0,551 | 0,2535 | 0,156 | Mốc tốt nhất. So với Qwen3-8B đơn: Doc R +0,007, Doc F2 0,3171 (+0,004), Doc P 0,160; Chunk F2 0,1906 (+0,002). Gộp 3 model tăng chủ yếu phía doc, chunk recall vẫn gần như đứng yên. Chưa có ghigh/cover trên bản này |
 | v2 nb60-drr-bge-only-ghigh1-min200-s20 (γ −1 + bỏ đoạn < 200 ký tự + bỏ chunk bge < 0,2, gộp 3 bước chưa thử riêng) | 0,2450 | 0,530 | 0,2195 | 0,177 | Chunk P +0,018 nhưng R −0,015 so với ghigh: Chunk F2 0,1908 → 0,1844. Ở P ≈ 0,17, R ≈ 0,22, một đơn vị R đáng ≈ 2,6 đơn vị P trong F2; cắt chunk để lấy precision là lỗ. Bước nào làm mất R chưa tách được |
 
 ### Kết luận
