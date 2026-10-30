@@ -1,0 +1,19 @@
+# RTX Pro 6000, Internet OFF: qwen8b over the three corpus v2 addition parts only (vi-part-007, en-part-001,
+# zh-part-001; 270,405 chunks). Baseline v1 parts are already embedded by medxir-embed-corpus-qwen8b-s0..s2.
+# Vectors (~2.2 GB) are fetched afterwards with curl (runs/chains/fetch_resume.sh style), not here.
+kernel:
+  id: boinhbo/medxir-embed-additions-qwen8b
+  title: medxir embed additions qwen8b
+  code_file: src/notebooks/kaggle_embed_additions_qwen8b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-package-qwen8b]
+  dataset_sources: [ntklinhfitus/medxir-chunk-corpus-v2]
+  timeout_seconds: 36000
+  poll_interval_seconds: 300
+  expected_hardware_contains: "6000"
+  fetch_files: [embed_manifest.json, vectors/vi-part-007-ids.parquet, vectors/en-part-001-ids.parquet, vectors/zh-part-001-ids.parquet]
+  required_outputs: [embed_manifest.json]

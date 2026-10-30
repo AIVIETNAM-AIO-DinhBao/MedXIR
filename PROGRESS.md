@@ -2,15 +2,15 @@
 
 **Cập nhật:** 30/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
 
-> **Hai hướng song song từ 27/10.** (A) Hybrid + corpus v2 (notebook hybrid, `expand_chunks.py`): tốt nhất **0,2437** (`v2 nb60-d200`), mục "Hybrid retrieval và ghép chunk — 27–29/10/2026". (B) Ensemble 8B + cửa sổ + PRF + biến thể query bằng LLM trên corpus v1 (`fuse_scores.py`, chạy local): tốt nhất **0,2444** (`var-all-b1-d200-c70-x1`), mục "Ensemble 8B, cửa sổ, PRF và biến thể query — 27–30/10/2026" và [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Hai hướng chưa được ghép: vector Octen-8B và Qwen3-Embedding-8B chỉ phủ corpus v1.
+> **Tốt nhất 30/10: FINAL 0,2755** (`v2ens-bge25-drr-d200-c76-x1`): ghép hai hướng trên corpus v2. Ensemble dense 4B + Qwen3-8B + Octen-8B (query gốc, PRF, biến thể LLM) + BM25 v2 + điểm bge của pool hybrid, gộp min-max (`fuse_scores.py`), rồi bge doc rerank (`kaggle_doc_rerank_ens.ipynb`) và cửa sổ 3 chunk × 76. Công thức đầy đủ: mục "Ghép hai hướng trên corpus v2 — 30/10/2026" cuối file. Hai hướng trước đó: (A) hybrid + `expand_chunks.py`, mục "Hybrid retrieval và ghép chunk"; (B) ensemble + cửa sổ trên v1, mục "Ensemble 8B, cửa sổ, PRF và biến thể query" và [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
 ## Bàn giao
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,2539** (`v2 fusion 4B 0,35 · Qwen3-8B 0,35 · Octen-8B 0,30 nb60-d200-drr-bge-only`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2755** (`v2ens-bge25-drr-d200-c76-x1`, hai hướng ghép, corpus v2; Doc F2 0,3197, Chunk F2 0,2314). Hướng A riêng: 0,2539 (`v2 fusion 4B 0,35 · Qwen3-8B 0,35 · Octen-8B 0,30 nb60-d200-drr-bge-only`). Hướng B riêng (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
 - Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437 → v2 nb60-d200-drr-bge-only 0,2464 → ghigh 0,2477.
-- Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444.
+- Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444 → **ghép hai hướng trên v2 0,2755**.
 - **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
 - Hạn public 30–31/10, nộp hệ thống 04/11. Quota 10 lượt/ngày; hỏi trước khi nộp.
 - File mới từ 27/10 chưa commit (xem mục 5).
@@ -84,7 +84,11 @@ Mục cũ (chọn chunk từ pool top-500, gộp điểm doc, trọng số BM25)
 
 | File | Đã nộp | Điểm | Ghi chú |
 |---|---|---:|---|
-| **v2 nb60-d200-drr-bge-only** | Có | **0,2464** | **Mốc tốt nhất** (hướng A, corpus v2) |
+| **v2ens-bge25-drr-d200-c76-x1** (`artifacts/submission/`) | Có | **0,2755** | **Mốc tốt nhất** (hai hướng ghép, corpus v2) |
+| v2ens-bge25-d200-c76-x1 (`artifacts/submission/`) | Chưa nộp | | Như trên, chưa bge doc rerank |
+| v2 fusion 4B · Qwen3-8B · Octen-8B nb60-drr-bge-only (`R2/submission/fusion-35-35-30/`) | Có | 0,2539 | Mốc tốt nhất hướng A |
+| v2 Qwen3-8B hybrid nb60-drr-bge-only (`R2/submission/qwen8b/`) | Có | 0,2509 | |
+| v2 nb60-d200-drr-bge-only | Có | 0,2464 | |
 | **var-all-b1-d200-c70-x1** (`artifacts/submission/`) | Có | 0,2444 | Mốc tốt nhất hướng B |
 | ens4-prfoct-b1-d200-c70-x1 | Có | 0,2429 | |
 | ens4-b1-d200-c70-x1 | Có | 0,2410 | |
@@ -814,4 +818,53 @@ Nhận xét: cửa sổ 3 chunk là bước lớn nhất (+0,044). Qwen-8B thêm
 ### Ghép với hướng A
 
 Corpus v2 cho +0,020 ở hướng A, bằng mọi thay đổi model ở hướng B cộng lại. Corpus v2 là v1 cộng một file chunk additions riêng ([docs/DATA_ADDITIONS_20261029.md](docs/DATA_ADDITIONS_20261029.md)), nên vector 8B của v1 vẫn dùng được. Để dùng ensemble 8B trên v2 cần embed phần chunk thêm vào v2 (~0,27 triệu chunk) bằng Octen-8B và Qwen3-Embedding-8B (khoảng 380 token mỗi chunk ở 19k token/s, ước tính khoảng 1,5 giờ GPU mỗi model), rồi chạy lại BM25 v2, PRF và tìm kiếm biến thể trên v2.
+
+## Ghép hai hướng trên corpus v2 — 30/10/2026
+
+**Kết quả: FINAL 0,2755**, cao nhất tới giờ (+0,0216 so với 0,2539 của hướng A; +0,031 so với 0,2444 của hướng B trên v1).
+
+| Bài | FINAL | Doc F2 | Chunk F2 | Doc P | Doc R | Chunk P | Chunk R |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **v2ens-bge25-drr-d200-c76-x1** | **0,2755** | **0,3197** | **0,2314** | 0,1611 | **0,556** | **0,2194** | **0,2842** |
+| Hướng A tốt nhất: v2 fusion 4B · Qwen3-8B · Octen-8B nb60-drr-bge-only | 0,2539 | 0,3171 | 0,1906 | 0,160 | 0,551 | 0,156 | 0,2535 |
+| Hướng B tốt nhất (v1): var-all-b1-x1 | 0,2444 | 0,2828 | 0,2060 | 0,145 | 0,4849 | 0,2082 | 0,2468 |
+
+Vế doc gần bằng hướng A (+0,003): cùng corpus v2, cùng bge doc rerank. **Phần tăng nằm ở vế chunk (+0,041)**: Chunk P 0,156 → 0,219 và Chunk R 0,254 → 0,284. Hai khác biệt so với nb60: (1) mọi mục nộp đều là cửa sổ 3 chunk, cửa sổ nào chứa chunk đã có trong cửa sổ xếp cao hơn thì bỏ, nên byte không bị lặp; (2) chunk được xếp theo điểm gộp của cả ensemble và bge, không chỉ bge. Cửa sổ chiếm hết ngân sách (76 cửa sổ, ZIP 96,5 MB so với 92 MB của 70 cửa sổ trên v1, vì chunk ZH nén tốt hơn).
+
+### Công thức (tái lập được)
+
+1. **Ứng viên trên v2** (`scripts/retrieve_additions.py`, CPU local, 5,5 phút, RAM 4,5 GB): mỗi danh sách top-500 v1 đã có được ghép với top-500 trên ba part mới (`vi-part-007`, `en-part-001`, `zh-part-001`) theo cosine. Cùng model nên cùng thang điểm, chunk id không trùng, nên kết quả bằng đúng tìm trên toàn v2. Vector additions: datasets `ntklinhfitus/medxir-vectors-{qwen3-4b,qwen3-8b,octen-8b}-additions` (tải về `artifacts/kaggle/vectors-{qwen3-4b,qwen8b,octen8b}-add/`), chunk v2 ở `artifacts/kaggle/chunk-corpus-v2/`. PRF dựng lại như `prf_local_8b.py` (5 chunk phản hồi lấy từ ens4 trên v1). Ra `artifacts/submission/candidates-<list>-v2-k500.npz`.
+2. **Gộp điểm** (`scripts/fuse_scores.py --corpus v2`): min-max theo query, cộng có trọng số, pool hợp:
+
+| Nguồn | Trọng số |
+|---|---:|
+| bge-reranker-v2-m3 (`final_score` của `ntklinhfitus/medxir-hybrid-v2` pool.parquet, 600 chunk/query từ 4B + BM25 trên v2) | 0,25 |
+| BM25 tiếng Việt v2 (`ntklinhfitus/medxir-bm25-vi`) | 0,14 |
+| Octen-8B query gốc / PRF | 0,09 / 0,12 |
+| Qwen3-Embedding-8B query gốc / PRF | 0,08 / 0,09 |
+| Qwen3-Embedding-4B query gốc | 0,09 |
+| Biến thể LLM Octen question / passage / terms | 0,035 / 0,035 / 0,01 |
+| Biến thể LLM Qwen3-8B question / passage / terms | 0,025 / 0,025 / 0,01 |
+
+   Trọng số chọn tay, chưa tối ưu. 92,8% tâm cửa sổ (khi chưa có bge) nằm trong pool bge, nên điểm bge phủ gần hết. bge 0,25 đổi 20% tâm cửa sổ và 17,5% doc so với không bge.
+3. **Danh sách doc:** điểm doc = chunk tốt nhất + 1,0 × (chunk thứ 2 + thứ 3), 200 doc. Xuất pool top-600 và bài nộp (`--export-pool 600`) lên dataset riêng `boinhbo/medxir-docrerank-ens-v2`; kernel `boinhbo/medxir-doc-rerank-ens-v2` (`src/notebooks/kaggle_doc_rerank_ens.ipynb` = `build_doc_rerank_notebook.py --gpu-bge`, config `configs/kaggle/doc_rerank_ens_v2_rtx6000.yaml`, exp_0028) chấm bge cho các doc hạng 0–400 (414.164 cặp, 20 phút RTX Pro 6000). `fuse_scores.py --doc-rank` xếp lại theo quy tắc bge-only của hướng A: ứng viên xếp theo điểm bge, giữ số doc như cũ, rồi thêm doc của mọi chunk đã nộp. bge thay trung bình 50,9 doc/query; 193–232 doc/query (trung vị 205).
+4. **Chunk:** `--context 1 --chunk-counts 76`: 76 cửa sổ (chunk + chunk liền trước + liền sau, ghép theo offset), bỏ cửa sổ có tâm nằm trong cửa sổ cao hơn cùng văn bản.
+
+```
+A=artifacts/submission; E() { echo "--extra $A/candidates-$1-v2-k500.npz:$2"; }
+uv run python scripts/fuse_scores.py --tag v2ens-bge25-drr --corpus v2 --bm25 artifacts/bm25-v2/vi-candidates-k500.npz --w-bm25 0.14 \
+  $(E 4b 0.09) $(E octen8b 0.09) $(E octen8b-prf 0.12) $(E qwen8b 0.08) $(E qwen8b-prf 0.09) \
+  $(E octen8b-question 0.035) $(E octen8b-passage 0.035) $(E qwen8b-question 0.025) $(E qwen8b-passage 0.025) \
+  $(E octen8b-terms 0.01) $(E qwen8b-terms 0.01) --bge-pool artifacts/hybrid-v2/pool.parquet:0.25 \
+  --pool union --doc-beta 1.0 --context 1 --chunk-counts 76 --doc-rank $A/docrerank-v2ens-bge25/doc_rank.parquet
+```
+
+Bỏ `--doc-rank` và thêm `--export-pool 600` để dựng bản trước doc rerank (input cho kernel).
+
+### Hướng tiếp theo (xếp theo kỳ vọng)
+
+1. **Thêm byte cho chunk.** Chunk R vẫn bị giới hạn bởi 100 MB (phân tích của hướng A). Nếu dashboard nhận ZIP bzip2 (đang thử bằng file `BZIP2TEST` của hướng A), cùng giới hạn chứa được ~1,55× văn bản: khoảng 115 cửa sổ thay vì 76.
+2. **Byte theo độ tự tin (ghigh):** hướng A +0,0013 với γ −0,5. Áp vào số cửa sổ mỗi query.
+3. **bge cho toàn pool của ensemble:** pool bge hiện chỉ là 600 chunk của 4B + BM25; 7% tâm cửa sổ của ta không có điểm bge.
+4. **Doc list:** RRF 1:1 giữa thứ hạng ensemble và bge thay cho bge-only (bge thay tới 51 doc/query); `cover` của hướng A (doc hạng 100–200 thường không có đoạn nào được nộp).
 

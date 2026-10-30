@@ -226,9 +226,20 @@ CELLS = [
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--output', type=Path, default=Path('src/notebooks/kaggle_doc_rerank.ipynb'))
+    parser.add_argument('--gpu-bge', action='store_true',
+                        help='GPU run: bge on ranks 0-400, no prior doc_rank.parquet, one cheap BUILD variant '
+                             '(for a pool/submission exported by fuse_scores.py --export-pool)')
     args = parser.parse_args()
-    args.output.write_text(json.dumps(notebook(CELLS), ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
-    print(f'{args.output}: {len(CELLS)} cells')
+    cells = CELLS
+    if args.gpu_bge:
+        config = (CONFIG.replace("DOC_RERANKERS = {}          #", "DOC_RERANKERS = {'bge-reranker-v2-m3': (0, 400)}  #")
+                  .replace('PRIOR_DOC_RANK = True       #', 'PRIOR_DOC_RANK = False      #')
+                  .replace("BUILD = ['nb60-drr-bge-only-ghigh1-min200-s20', 'nball-drr-bge-only-ghigh-min200']",
+                           "BUILD = ['nb60-drr-bge-only']   # unused: the ensemble submission is rebuilt locally"))
+        assert config.count("'bge-reranker-v2-m3': (0, 400)}  #") == 1 and 'PRIOR_DOC_RANK = False' in config
+        cells = [(kind, config if text is CONFIG else text) for kind, text in CELLS]
+    args.output.write_text(json.dumps(notebook(cells), ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    print(f'{args.output}: {len(cells)} cells')
 
 
 if __name__ == '__main__':

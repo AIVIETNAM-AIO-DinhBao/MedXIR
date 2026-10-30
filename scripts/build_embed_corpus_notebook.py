@@ -42,6 +42,7 @@ MODEL = '@REPO@'
 MODEL_DIR = '@DIR@'
 DOC_PREFIX = @PREFIX@         # text put before every chunk (Octen's document prompt is a single space)
 SHARD, SHARDS = @SHARD@, @SHARDS@  # this run embeds parts with index % SHARDS == SHARD
+ONLY_PARTS = @ONLY@          # part keys like 'vi-part-007' to embed (corpus v2 additions); None = every part of the shard
 EXPECT_GPU = '6000'          # refuse to run on any other GPU
 BATCH = @BATCH@              # 0.6B/4B: best batch in the RTX Pro 6000 benchmark; 8B: not benchmarked, 16 fits in 96 GB
 MAX_LENGTH = 1024            # longest chunk is ~880 tokens, so nothing is truncated
@@ -113,6 +114,10 @@ import pyarrow.parquet as pq
 parts = sorted(glob.glob('/kaggle/input/**/chunks/*/part-*.parquet', recursive=True))
 assert parts, 'attach boinhbo/medxir-chunk-corpus (kernel source) before Run All'
 parts = [path for index, path in enumerate(parts) if index % SHARDS == SHARD]
+if ONLY_PARTS is not None:
+    parts = [path for path in parts
+             if f"{path.split(os.sep)[-2]}-{os.path.basename(path).removesuffix('.parquet')}" in ONLY_PARTS]
+    assert len(parts) == len(ONLY_PARTS), f'expected parts {ONLY_PARTS}, found {parts}'
 print(len(parts), 'parts in shard', SHARD, 'of', SHARDS)
 progress, started = [], time.perf_counter()
 for path in parts:
@@ -188,11 +193,11 @@ def notebook(cells):
 SETTINGS = {'0.6B': (16, 7), '4B': (8, 5), '8B': (16, 8)}  # 8B: ~16k tokens/s, so 3 shards of ~5.5 h
 
 
-def cells(size, shard=0, shards=1, repo=None, package='boinhbo/medxir-package-models', prefix=''):
+def cells(size, shard=0, shards=1, repo=None, package='boinhbo/medxir-package-models', prefix='', only=None):
     batch, budget = SETTINGS[size]
     repo = repo or f'Qwen/Qwen3-Embedding-{size}'
     values = dict(SIZE=size, SHARD=shard, SHARDS=shards, BATCH=batch, BUDGET_H=budget, REPO=repo,
-                  DIR=repo.split('/')[-1], PACKAGE=package, PREFIX=repr(prefix))
+                  DIR=repo.split('/')[-1], PACKAGE=package, PREFIX=repr(prefix), ONLY=repr(only))
     return [
         ('md', render(MARKDOWN_INTRO, **values)),
         ('code', render(CODE_PARAMS, **values)),
@@ -216,15 +221,17 @@ def main():
     parser.add_argument('--repo', default=None, help='Hugging Face repo; default Qwen/Qwen3-Embedding-<size>')
     parser.add_argument('--package', default='boinhbo/medxir-package-models', help='kernel whose output holds the model')
     parser.add_argument('--prefix', default='', help='text put before every chunk')
+    parser.add_argument('--only', nargs='+', default=None, metavar='PART',
+                        help="embed only these parts, e.g. vi-part-007 en-part-001 zh-part-001 (corpus v2 additions)")
     parser.add_argument('--slug', default=None, help='notebook name part; default the size, e.g. 4b')
     parser.add_argument('--output', type=Path, default=None)
     args = parser.parse_args()
     slug = args.slug or args.size.lower().replace('.', '')
     output = args.output or ROOT / 'src' / 'notebooks' / (
-        'kaggle_embed_corpus.ipynb' if args.size == '0.6B' and args.shards == 1 and not args.repo
+        'kaggle_embed_corpus.ipynb' if args.size == '0.6B' and args.shards == 1 and not args.repo and not args.only
         else f'kaggle_embed_corpus_{slug}_s{args.shard}.ipynb')
     output.parent.mkdir(parents=True, exist_ok=True)
-    body = cells(args.size, args.shard, args.shards, args.repo, args.package, args.prefix)
+    body = cells(args.size, args.shard, args.shards, args.repo, args.package, args.prefix, args.only)
     output.write_text(json.dumps(notebook(body), ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(f'{output}: {len(body)} cells')
 

@@ -1,0 +1,24 @@
+# bge document rerank (ranks 0-400) of the local ensemble on corpus v2: fuse_scores.py --corpus v2 --export-pool 600
+# writes artifacts/submission/docrerank-<tag>/{pool.parquet, medxir-hybrid-submission.json}, uploaded as the private
+# dataset boinhbo/medxir-docrerank-ens-v2. Only doc_rank.parquet is used: fuse_scores.py --doc-rank rebuilds the ZIP.
+kernel:
+  id: boinhbo/medxir-doc-rerank-ens-v2
+  title: medxir doc rerank ens v2
+  code_file: src/notebooks/kaggle_doc_rerank_ens.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources:
+    - boinhbo/medxir-package-rerankers
+  dataset_sources: [boinhbo/medxir-retrieval-inputs, ntklinhfitus/medxir-chunk-corpus-v2, boinhbo/medxir-docrerank-ens-v2]
+  timeout_seconds: 10800
+  poll_interval_seconds: 120
+  fetch_files:
+    - progress.txt
+    - faulthandler.txt
+    - doc_rank.parquet
+  required_outputs:
+    - doc_rank.parquet

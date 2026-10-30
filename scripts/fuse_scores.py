@@ -24,6 +24,12 @@ pieces shorter than our 350-word chunks match short reference chunks that a whol
 side (chunks carry character offsets, so overlaps are removed). A chunk already inside a higher-ranked window
 of the same text is skipped, so the byte budget is not spent on repeated text.
 
+--corpus v2 reads the three corpus v2 addition parts and the v2 hash groups as well (candidate lists from
+retrieve_additions.py, BM25 from --bm25). --bge-pool adds the hybrid run's bge scores (pool.parquet final_score) as one
+more list. --export-pool N writes this run's top-N pool and submission in the layout kaggle_doc_rerank.ipynb reads;
+--doc-rank then re-orders the submitted documents by that notebook's bge scores (its 'bge-only' rule: candidate
+documents sorted by bge, the same count kept, then every submitted chunk's document added).
+
 Inputs:  artifacts/submission/candidates-4b-k500.npz, artifacts/bm25/vi-candidates-k500.npz
 Outputs: artifacts/submission/medxir-<tag>-d<N>-c<C>-submission.zip, plus a printed set-difference vs dense.
 
@@ -166,8 +172,32 @@ def window_text(cid, context, spans):
     return text
 
 
+def bge_doc_order(doc_rank, column):
+    """{query_id: candidate documents sorted by the reranker score, unscored ones last in candidate order}."""
+    frame = pd.read_parquet(doc_rank, columns=['query_id', 'doc_id', 'base_rank', column])
+    frame = frame[frame['base_rank'] >= 0].sort_values(['query_id', 'base_rank'])
+    out = {}
+    for qid, g in frame.groupby('query_id'):
+        scored = g[g[column].notna()].sort_values(column, ascending=False, kind='stable')
+        out[int(qid)] = [int(d) for d in scored['doc_id']] + [int(d) for d in g.loc[g[column].isna(), 'doc_id']]
+    return out
+
+
+def pool_list(path):
+    """A hybrid pool.parquet (final_score = reranker score) as a ragged candidate list in query.parquet order."""
+    pool = pd.read_parquet(path, columns=['query_id', 'chunk_id', 'final_score'])
+    groups = {int(q): g for q, g in pool.groupby('query_id')}
+    queries = pd.read_parquet(ROOT / 'dataset' / 'query.parquet', columns=['id'])['id'].tolist()
+    ids = np.empty(len(queries), dtype=object)
+    scores = np.empty(len(queries), dtype=object)
+    for qi, qid in enumerate(queries):
+        g = groups[int(qid)]
+        ids[qi], scores[qi] = g['chunk_id'].to_numpy(), g['final_score'].to_numpy(dtype=np.float32)
+    return ids, scores
+
+
 def build_submission(queries, chunk_ids, doc_reps, records, lookup, doc_count, chunk_count, split=1,
-                     windows=None, context=0, spans=None):
+                     windows=None, context=0, spans=None, doc_override=None):
     submission = []
     for qi, query_id in enumerate(queries['id'].tolist()):
         chunks = []
@@ -179,6 +209,8 @@ def build_submission(queries, chunk_ids, doc_reps, records, lookup, doc_count, c
                 for text in texts:
                     chunks.append(dict(doc_id=doc_id, chunk_text=text, chunk_order=record['chunk_order']))
         relevant_docs = dense.ranked_docs(doc_reps[qi], records, lookup)[:doc_count]
+        if doc_override is not None:
+            relevant_docs = doc_override[int(query_id)]
         # Same rule as retrieve_local_4b.build_submission: every submitted chunk's document is listed.
         listed = set(relevant_docs)
         for chunk in chunks:
@@ -211,6 +243,15 @@ def main():
     parser.add_argument('--doc-beta', type=float, default=0.0, help='weight of the 2nd + 3rd best chunk in a doc score')
     parser.add_argument('--doc-counts', default='200')
     parser.add_argument('--chunk-counts', default='150')
+    parser.add_argument('--corpus', choices=['v1', 'v2'], default='v1')
+    parser.add_argument('--bm25', type=Path, default=ROOT / 'artifacts' / 'bm25' / 'vi-candidates-k500.npz')
+    parser.add_argument('--bge-pool', metavar='PARQUET:WEIGHT', default=None,
+                        help='reranker scores of a hybrid pool.parquet as one more list')
+    parser.add_argument('--export-pool', type=int, default=0,
+                        help='write the top-N fused pool + the submission JSON for kaggle_doc_rerank.ipynb')
+    parser.add_argument('--doc-rank', type=Path, default=None,
+                        help="doc_rank.parquet of kaggle_doc_rerank.ipynb run on this run's --export-pool output")
+    parser.add_argument('--doc-rank-column', default='bge-reranker-v2-m3')
     parser.add_argument('--dry-run', action='store_true', help='print the set difference only, write nothing')
     parser.add_argument('--out', type=Path, default=ROOT / 'artifacts' / 'submission')
     args = parser.parse_args()
@@ -220,7 +261,7 @@ def main():
     cached = np.load(args.out / 'candidates-4b-k500.npz')
     assert cached['keys'].tolist() == [p.stem for p in vector_paths]
     dense_ids = dense.chunk_ids(cached['parts'], cached['rows'], vector_paths)
-    bm25 = np.load(ROOT / 'artifacts' / 'bm25' / 'vi-candidates-k500.npz', allow_pickle=True)
+    bm25 = np.load(args.bm25, allow_pickle=True)
     assert bm25['query_ids'].tolist() == queries['id'].tolist()
     lists = [(bm25['chunk_ids'], bm25['scores'], args.w_bm25)]
     for spec in args.extra:
@@ -228,6 +269,9 @@ def main():
         extra = np.load(path, allow_pickle=True)
         assert extra['query_ids'].tolist() == queries['id'].tolist(), path
         lists.append((extra['chunk_ids'], extra['scores'], float(weight)))
+    if args.bge_pool:
+        path, weight = args.bge_pool.rsplit(':', 1)
+        lists.append((*pool_list(path), float(weight)))
     w_dense = 1 - sum(w for _, _, w in lists)  # weights sum to 1
     assert w_dense > -1e-9, 'extra weights add up to more than 1'  # 0 keeps 4B chunks in the pool, unscored
     merged_ids, merged_scores = dense_ids, cached['scores']
@@ -266,6 +310,11 @@ def main():
         return
     wanted = set(ids.ravel().tolist())
     chunk_files = sorted((kaggle / 'chunk-corpus-v1' / 'chunks').glob('*/part-*.parquet'))
+    hash_path = kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet'
+    if args.corpus == 'v2':  # v1 parts unchanged + vi-part-007, en-part-001, zh-part-001; hash groups v1 + additions
+        chunk_files += sorted((kaggle / 'chunk-corpus-v2' / 'chunks').glob('*/part-*.parquet'))
+        hash_path = kaggle / 'chunk-corpus-v2' / 'hash_groups.parquet'
+        assert len(chunk_files) == 12, chunk_files
     windows = spans = None
     if args.context:
         windows = [select_windows(row, max(chunk_counts), args.context) for row in chunk_ids]
@@ -276,13 +325,34 @@ def main():
         assert centers <= set(spans)
     records = dense.chunk_records(chunk_files, wanted, set(chunk_ids[:, :max(chunk_counts)].ravel().tolist()))
     assert not wanted - set(records)
-    lookup = dense.group_lookup(kaggle / 'chunk-corpus-v1' / 'hash_groups.parquet')
+    lookup = dense.group_lookup(hash_path)
     corpus_ids = set(map(int, pd.read_parquet(ROOT / 'dataset' / 'links_corpus_vi_en_zh.parquet', columns=['id'])['id']))
+    doc_override = None
+    if args.doc_rank:
+        order = bge_doc_order(args.doc_rank, args.doc_rank_column)
+        base = build_submission(queries, chunk_ids, doc_reps, records, lookup, doc_counts[0], chunk_counts[0],
+                                args.split, windows, args.context, spans)
+        # The notebook's candidates start with the submitted list: keep as many documents as it had.
+        doc_override = {e['id']: order[e['id']][:len(e['relevant_docs'])] for e in base}
+        moved = np.mean([len(set(doc_override[e['id']]) - set(e['relevant_docs'])) for e in base])
+        print(json.dumps(dict(doc_rank=str(args.doc_rank), new_docs_per_query=round(float(moved), 1))), flush=True)
     for n in doc_counts:
         for c in chunk_counts:
             submission = build_submission(queries, chunk_ids, doc_reps, records, lookup, n, c, args.split,
-                                          windows, args.context, spans)
+                                          windows, args.context, spans, doc_override)
             dense.validate(submission, queries, corpus_ids)
+            if args.export_pool:  # kaggle_doc_rerank.ipynb inputs: pool.parquet + medxir-hybrid-submission.json
+                folder = args.out / f'docrerank-{args.tag}'
+                folder.mkdir(exist_ok=True)
+                rows = [(int(qid), cid, rank, float(sc), 0.0, -1, -1)
+                        for qid, row, row_scores in zip(queries['id'], ids, scores)
+                        for rank, (cid, sc) in enumerate(zip(row[:args.export_pool], row_scores[:args.export_pool]))]
+                pd.DataFrame(rows, columns=['query_id', 'chunk_id', 'final_rank', 'final_score', 'rrf', 'dense_rank',
+                                            'bm25_rank']).to_parquet(folder / 'pool.parquet', index=False,
+                                                                     compression='zstd')
+                (folder / 'medxir-hybrid-submission.json').write_text(
+                    json.dumps(submission, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+                print('doc rerank inputs:', folder, flush=True)
             name = (f'medxir-{args.tag}-d{n}-c{c}' + (f'-s{args.split}' if args.split > 1 else '')
                     + (f'-x{args.context}' if args.context else '') + '-submission')
             print(f'd{n}-c{c}', dense.write_submission(submission, args.out, name), flush=True)
