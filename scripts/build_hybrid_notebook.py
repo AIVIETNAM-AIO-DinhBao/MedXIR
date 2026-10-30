@@ -542,7 +542,7 @@ CELLS = [
     ('code', guarded('setup', SETUP)),
     ('md', '## 2. Query variants (USE_QUERY_SPLIT)'),
     ('code', guarded('variants', VARIANTS)),
-    ('md', '## 3. Encode with Qwen3-Embedding-4B (USE_CUSTOM_INSTRUCT picks the instruction)'),
+    ('md', '## 3. Encode queries with the active models (USE_CUSTOM_INSTRUCT picks the instruction)'),
     ('code', guarded('encode', ENCODE)),
     ('md', '## 4. Configure sequential vector loading (one model at a time)'),
     ('code', guarded('load_vectors', LOAD_VECTORS)),
