@@ -1,0 +1,27 @@
+# Rebuild the doc-rerank ZIPs on CPU from an earlier run's doc_rank.parquet (no scoring): same notebook as
+# doc_rerank_rtx6000.yaml with DOC_RERANKERS = {} and PRIOR_DOC_RANK = True (the notebook defaults, 30/10).
+# The earlier run's output (kernel source) gives doc_rank.parquet; the hybrid-v2 bundle and the corpus must be
+# the ones that run used, or the candidate check in the notebook fails. ~15 min, mostly reading chunk rows.
+kernel:
+  id: boinhbo/medxir-doc-rerank-rebuild
+  title: medxir doc rerank rebuild
+  code_file: src/notebooks/kaggle_doc_rerank.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  kernel_sources:
+    - boinhbo/medxir-doc-rerank
+  dataset_sources: [boinhbo/medxir-retrieval-inputs, ntklinhfitus/medxir-chunk-corpus-v2, boinhbo/medxir-hybrid-v2]
+  timeout_seconds: 7200
+  poll_interval_seconds: 60
+  metrics_file: expand_manifest.json
+  fetch_files:
+    - progress.txt
+    - faulthandler.txt
+    - expand_manifest.json
+    - doc_rank.parquet
+    - medxir-expand-nb60-drr-bge-only-ghigh1-min200-s20-submission.zip
+    - medxir-expand-nball-drr-bge-only-ghigh-min200-submission.zip
+  required_outputs:
+    - expand_manifest.json
+    - medxir-expand-nball-drr-bge-only-ghigh-min200-submission.zip

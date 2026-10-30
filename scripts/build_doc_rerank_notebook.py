@@ -43,14 +43,16 @@ CONFIG = r"""
 # ===================== Config: the only cell to edit =====================
 # reranker -> (first, last) candidate rank scored per query (submitted order; the cut is at 200).
 # bge on 0-400: 29/10 run 0.2253 (nb60 0.2235). Qwen3-Reranker-4B on 120-360 (~2 h) lost: qwen4b-only 0.2176.
-DOC_RERANKERS = {'bge-reranker-v2-m3': (0, 400)}
+DOC_RERANKERS = {}          # CPU rebuild below; GPU run: {'bge-reranker-v2-m3': (0, 400)}
 # DOC_RERANKERS = {'Qwen3-Reranker-4B': (120, 360)}   # 30/10 run; the 'qwen4b' variants keep the top 120
-PRIOR_DOC_RANK = False      # True: merge the score columns of an attached doc_rank.parquet of the SAME hybrid run
+# CPU rebuild (no GPU, ~15 min): DOC_RERANKERS = {}, PRIOR_DOC_RANK = True, attach the earlier run's doc_rank.parquet
+PRIOR_DOC_RANK = True       # True: merge the score columns of an attached doc_rank.parquet of the SAME hybrid run
 LEAD_CHARS = 400            # characters of the document start (title / lead) shown before the chunks
 DOC_CHUNKS = 1              # best pool chunks of the document shown; 2 doubles the pair length (Qwen ~4 h)
 DOC_MAX_TOKENS = 1024 if DOC_CHUNKS > 1 else 512   # pair length cap for the reranker
 QWEN_BATCH = 16
-BUILD = ['nb60', 'nb60-drr-bge', 'nb60-drr-bge-only']  # variants with absent columns are skipped
+BUILD = ['nb60-drr-bge-only-ghigh1-min200-s20', 'nball-drr-bge-only-ghigh-min200']
+# v2 30/10: bge-only 0.2464, glow 0.2352, ghigh 0.2477
 QUERY_LIMIT = 0             # >0: first N queries only (speed check; doc_rank.parquet written, no ZIPs)
 """
 
@@ -65,10 +67,14 @@ import torch
 
 for root in sorted(glob.glob('/kaggle/input/*/*/*')) or sorted(glob.glob('/kaggle/input/*')):
     print('input:', root, sorted(os.listdir(root))[:12] if os.path.isdir(root) else '')
-print(subprocess.run(['nvidia-smi', '--query-gpu=index,name,memory.total', '--format=csv'],
-                     capture_output=True, text=True).stdout)
-GPU_NAME = torch.cuda.get_device_name(0)
-assert '6000' in GPU_NAME, f'Expected RTX Pro 6000, got {GPU_NAME!r}'
+if DOC_RERANKERS:
+    print(subprocess.run(['nvidia-smi', '--query-gpu=index,name,memory.total', '--format=csv'],
+                         capture_output=True, text=True).stdout)
+    GPU_NAME = torch.cuda.get_device_name(0)
+    assert '6000' in GPU_NAME, f'Expected RTX Pro 6000, got {GPU_NAME!r}'
+else:   # rebuild from an attached doc_rank.parquet: no scoring, CPU is enough
+    assert PRIOR_DOC_RANK, 'DOC_RERANKERS is empty: set PRIOR_DOC_RANK = True and attach doc_rank.parquet'
+    GPU_NAME = 'none'
 RERANK_PATH = {name: one_match(f'{name}/config.json').parent for name in DOC_RERANKERS}
 QUERY_TEXT = {int(q): str(t) for q, t in
               pd.read_parquet(one_match('query.parquet'), columns=['id', 'query']).itertuples(index=False)} \
@@ -82,6 +88,7 @@ QIDS = [e['id'] for e in CTX['base']][:QUERY_LIMIT or None]
 assert all(q in QUERY_TEXT for q in QIDS), 'query text missing for some ids'
 PRIOR = None
 prior_hits = sorted(glob.glob(f'{INPUT}/**/doc_rank.parquet', recursive=True))
+assert DOC_RERANKERS or prior_hits, 'no doc_rank.parquet attached'
 if PRIOR_DOC_RANK and prior_hits:
     assert len(prior_hits) == 1, f'several doc_rank.parquet attached: {prior_hits}'
     PRIOR = pd.read_parquet(prior_hits[0])

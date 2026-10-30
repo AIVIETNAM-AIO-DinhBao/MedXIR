@@ -12,6 +12,9 @@ quota reserves that share of the chunk bytes for ZH/EN texts; doc_quota swaps th
 list for the best ZH/EN pool documents (both lost on the leaderboard, 29/10); doc_rr re-orders the
 candidate documents by weighted RRF of their submitted rank and document-reranker scores (doc_rank.parquet,
 written by the doc-rerank notebook, kaggle_doc_rerank.ipynb), so the reranker decides which make the cut.
+conf_gamma moves chunk bytes between queries, total unchanged: a query's confidence is its number of pool
+chunks with rerank score >= conf_t; confident queries lose budget (their lowest-ranked chunks go) and the
+budget goes to queries with few strong chunks, which reach deeper into their pool.
 Runs on a Kaggle CPU session (Internet OFF is fine). Inputs:
   medxir-chunk-corpus      chunks/*/part-*.parquet, hash_groups.parquet
   medxir-hybrid-retrieval  pool.parquet, medxir-hybrid-submission.zip   (notebook output or uploaded dataset)
@@ -35,6 +38,13 @@ import pyarrow.parquet as pq
 # n_docs: document list length (0 = as submitted). quota / doc_quota: min ZH/EN share of chunk bytes / documents.
 # doc_rr: {score column of doc_rank.parquet: RRF weight}; w_base: RRF weight of the submitted document rank;
 # keep_top: that many top candidates kept as submitted, the rest of the list re-ordered.
+# conf_gamma: budget weight (confidence / median confidence) ** -gamma, clipped to CONF_CLIP, renormalised.
+# min_chars: spans shorter than this are not submitted. A span matches when it covers 40% of a reference
+# passage, so a 5-character ZH entry ('食管炎') can only match an equally short passage; such spans were 11% of
+# the entries of the 0.2464 ZIP (< 200 chars) for 0.35% of its text.
+# min_score: ranked chunks with a rerank score below it are not taken (nor their neighbours); the bytes a query
+# leaves unused go to the queries that used their whole budget, by the same confidence weights. bge scores are
+# high: at 0.2 the cut removes ~46 chunks in 16% of the queries (the unsure ones) and none elsewhere.
 VARIANTS = {
     'nb0': dict(nb=0), 'nb10': dict(nb=10), 'nb30': dict(nb=30), 'nb60': dict(nb=60), 'wholedoc': dict(nb='whole'),
     'nb60-d300': dict(nb=60, n_docs=300),
@@ -47,10 +57,29 @@ VARIANTS = {
     'nb60-drr-qwen4b-only': dict(nb=60, doc_rr={'Qwen3-Reranker-4B': 1.0}, w_base=0.0, keep_top=120),
     'nb60-drr-both': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0, 'Qwen3-Reranker-4B': 1.0}, w_base=1.0,
                           keep_top=120),
+    # Bge-only document list, chunk bytes moved between queries. 30/10 on v2 (bge-only 0.2464): glow (to unsure
+    # queries) 0.2352, ghigh (to confident queries) 0.2477; macro F2 rewards the queries that already score.
+    'nb60-drr-bge-only-glow': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=0.5, conf_t=0.5),
+    'nb60-drr-bge-only-ghigh': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5, conf_t=0.5),
+    'nb60-drr-bge-only-ghigh1': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-1.0,
+                                     conf_t=0.5),
+    # Precision: no tiny spans; 'nball' gives every ranked chunk its neighbours (no single chunks filling the
+    # budget), the entry shape of the x1-c70 submission (Chunk P 0.208 vs 0.155).
+    'nb60-drr-bge-only-ghigh1-min200': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-1.0,
+                                            conf_t=0.5, min_chars=200),
+    'nb60-drr-bge-only-ghigh-min200-s20': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0,
+                                               conf_gamma=-0.5, conf_t=0.5, min_chars=200, min_score=0.2),
+    'nb60-drr-bge-only-ghigh1-min200-s20': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0,
+                                                conf_gamma=-1.0, conf_t=0.5, min_chars=200, min_score=0.2),
+    'nb60-drr-bge-only-ghigh-min200': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5,
+                                           conf_t=0.5, min_chars=200),
+    'nball-drr-bge-only-ghigh-min200': dict(nb=10 ** 6, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0,
+                                            conf_gamma=-0.5, conf_t=0.5, min_chars=200),
 }
 ONLY = ['nb60-d300']   # variants to build this run; [] = all
 BUDGET_SCALE = 1.08   # 87.5 MB hybrid ZIP * 1.08 stays below the 100 MB limit
 MAX_ZIP_MB = 99.0
+CONF_CLIP = (0.5, 2.0)
 RRF_K = 60
 INPUT = os.environ.get('INPUT_ROOT', '/kaggle/input')
 OUT = Path(os.environ.get('OUT_DIR', '/kaggle/working'))
@@ -83,7 +112,7 @@ def merge_run(rows):
     return text
 
 
-def build_query(ranked, n_neighbour, budget, rows, by_pos, docs_of, quota=0.0):
+def build_query(ranked, n_neighbour, budget, rows, by_pos, docs_of, quota=0.0, scores=None, min_score=0.0):
     """Selected chunk ids for one query: ranked chunks (+ neighbours of the top ones) until the budget is used.
 
     quota > 0: a first pass caps VI chunks at (1 - quota) of the budget so ZH/EN chunks further down the pool
@@ -92,6 +121,8 @@ def build_query(ranked, n_neighbour, budget, rows, by_pos, docs_of, quota=0.0):
     chosen, used, vi_used = [], 0, 0
     for vi_cap in ([budget * (1 - quota)] if quota else []) + [budget]:
         for rank, cid in enumerate(ranked):
+            if min_score and scores[rank] < min_score:
+                break   # pool is in score order
             group = [cid]
             if rank < n_neighbour:
                 sha, order = rows[cid]['sha'], rows[cid]['order']
@@ -213,9 +244,11 @@ def load_inputs(pool_path=None, base=None, chunk_files=None):
     The hybrid notebook passes its own pool.parquet, in-memory submission and validated chunk parts;
     otherwise they are found under INPUT.
     """
-    pool = pd.read_parquet(pool_path or one_match('pool.parquet'), columns=['query_id', 'chunk_id', 'final_rank'])
+    pool = pd.read_parquet(pool_path or one_match('pool.parquet'),
+                           columns=['query_id', 'chunk_id', 'final_rank', 'final_score'])
     pool = pool.sort_values(['query_id', 'final_rank'])
     ranked = {qid: g['chunk_id'].tolist() for qid, g in pool.groupby('query_id', sort=False)}
+    score = {qid: g['final_score'].tolist() for qid, g in pool.groupby('query_id', sort=False)}
     base = load_submission() if base is None else base
     needed_sha_prefix = {cid.rsplit('-', 1)[0] for ids in ranked.values() for cid in ids}
 
@@ -248,7 +281,7 @@ def load_inputs(pool_path=None, base=None, chunk_files=None):
     by_text = {}
     for cid in sorted(rows, key=lambda c: rows[c]['order']):
         by_text.setdefault(rows[cid]['sha'], []).append(cid)
-    return dict(ranked=ranked, base=base, rows=rows, by_pos=by_pos, by_text=by_text, docs_of=docs_of,
+    return dict(ranked=ranked, score=score, base=base, rows=rows, by_pos=by_pos, by_text=by_text, docs_of=docs_of,
                 lang_of={doc: row['lang'] for cid, row in rows.items() for doc in docs_of(cid)})
 
 
@@ -261,6 +294,36 @@ def load_doc_scores():
     for qid, g in frame.groupby('query_id'):
         out[int(qid)] = {c: {int(d): float(s) for d, s in zip(g['doc_id'], g[c]) if s == s} for c in columns}
     return out
+
+
+def confidence_budget(budget, score, gamma, threshold):
+    """Per-query budgets re-weighted by (confidence / median) ** -gamma, the total kept."""
+    conf = {qid: sum(s >= threshold for s in score.get(qid, [])) + 1 for qid in budget}
+    median = sorted(conf.values())[len(conf) // 2]
+    weight = {qid: min(max((c / median) ** -gamma, CONF_CLIP[0]), CONF_CLIP[1]) for qid, c in conf.items()}
+    norm = sum(budget.values()) / sum(budget[q] * weight[q] for q in budget)
+    return {qid: budget[qid] * weight[qid] * norm for qid in budget}
+
+
+def chosen_bytes(chosen, rows, docs_of):
+    return sum(len(rows[c]['text'].encode('utf-8')) * len(docs_of(c)) for c in chosen)
+
+
+def score_cut_budget(budget, ctx, n_neighbour, min_score):
+    """Budgets after the score cut: what cut queries leave unused goes to the queries the cut did not stop,
+    in proportion to their budgets."""
+    used, full = {}, []
+    for qid, b in budget.items():
+        args = (ctx['ranked'][qid], n_neighbour, b, ctx['rows'], ctx['by_pos'], ctx['docs_of'])
+        cut = chosen_bytes(build_query(*args, scores=ctx['score'][qid], min_score=min_score), ctx['rows'], ctx['docs_of'])
+        if cut < chosen_bytes(build_query(*args), ctx['rows'], ctx['docs_of']):
+            used[qid] = cut
+        else:
+            full.append(qid)
+    freed = sum(budget[q] - used[q] for q in used)
+    grow = 1 + freed / max(sum(budget[q] for q in full), 1)
+    print(f'score cut {min_score}: {len(used)} queries cut, {freed / 1e6:.1f} MB moved to {len(full)} queries', flush=True)
+    return {qid: used[qid] if qid in used else budget[qid] * grow for qid in budget}
 
 
 def build_variants(ctx, only=None, doc_scores=None):
@@ -281,17 +344,22 @@ def build_variants(ctx, only=None, doc_scores=None):
                 print(name, 'skipped: no doc_rank column', absent, flush=True)
                 continue
         n_neighbour = spec['nb']
+        q_budget = (confidence_budget(budget, ctx['score'], spec['conf_gamma'], spec.get('conf_t', 0.5))
+                    if spec.get('conf_gamma') else budget)
+        if spec.get('min_score'):
+            q_budget = score_cut_budget(q_budget, ctx, n_neighbour, spec['min_score'])
         scale = 1.0
         while True:
             submission, n_spans, n_chunks, n_docs, other_docs, other_bytes, all_bytes, moved = [], 0, 0, 0, 0, 0, 0, 0
+            dropped = 0
             for entry in base:
                 qid = entry['id']
                 if n_neighbour == 'whole':
-                    chosen = build_whole_docs(ranked[qid], entry['relevant_docs'], budget[qid] * scale,
+                    chosen = build_whole_docs(ranked[qid], entry['relevant_docs'], q_budget[qid] * scale,
                                               rows, by_text, docs_of)
                 else:
-                    chosen = build_query(ranked[qid], n_neighbour, budget[qid] * scale, rows, by_pos, docs_of,
-                                         spec.get('quota', 0.0))
+                    chosen = build_query(ranked[qid], n_neighbour, q_budget[qid] * scale, rows, by_pos, docs_of,
+                                         spec.get('quota', 0.0), ctx['score'][qid], spec.get('min_score', 0.0))
                 if spec.get('doc_rr'):
                     q_scores = doc_scores.get(qid, {})
                     candidates = list(dict.fromkeys(
@@ -312,6 +380,9 @@ def build_variants(ctx, only=None, doc_scores=None):
                 listed = set(docs)
                 chunks = []
                 for cid, text in spans(chosen, rows):
+                    if len(text) < spec.get('min_chars', 0):
+                        dropped += 1
+                        continue
                     for doc in docs_of(cid):
                         chunks.append(dict(doc_id=doc, chunk_text=text, chunk_order=rows[cid]['order']))
                         if doc not in listed:
@@ -332,7 +403,7 @@ def build_variants(ctx, only=None, doc_scores=None):
             scale *= 0.95 * MAX_ZIP_MB / mb
         stats = dict(spec, zip_mb=round(mb, 1), budget_scale_applied=round(scale, 3),
                      chunks_per_query=round(n_chunks / len(base), 1), entries_per_query=round(n_spans / len(base), 1),
-                     docs_per_query=round(n_docs / len(base), 1),
+                     docs_per_query=round(n_docs / len(base), 1), short_dropped_per_query=round(dropped / len(base), 1),
                      zh_en_doc_share=round(other_docs / len(base), 3),
                      zh_en_chunk_byte_share=round(other_bytes / max(all_bytes, 1), 3))
         if spec.get('doc_rr'):

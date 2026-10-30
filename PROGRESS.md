@@ -8,8 +8,8 @@
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,2444** (`var-all-b1-d200-c70-x1`, hướng B, corpus v1). Hướng A trên corpus v2: 0,2437 (`v2 nb60-d200`).
-- Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437.
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2477** (`v2 nb60-drr-bge-only-ghigh`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
+- Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437 → v2 nb60-d200-drr-bge-only 0,2464 → ghigh 0,2477.
 - Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444.
 - **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
 - Hạn public 30–31/10, nộp hệ thống 04/11. Quota 10 lượt/ngày; hỏi trước khi nộp.
@@ -76,18 +76,21 @@ Mục cũ (chọn chunk từ pool top-500, gộp điểm doc, trọng số BM25)
 7. **Embed tiêu đề doc VI/ZH** (bỏ hậu tố tên trang như "| Sức Khỏe Cộng Đồng"; EN đã có tiêu đề ở đầu văn bản). Cột `title` trong `Kaggle-Group/archive.zip` → `docs/<lang>/part-v1-*.parquet`.
 8. ICD (Octen): để sau. Cân nhắc tập dev ~100 query nhãn LLM để thử offline.
 
+**Nghi vấn chưa tách (30/10), thử sau.** Bản gộp `ghigh1-min200-s20` (0,2450) thua `ghigh` (0,2477) vì Chunk R giảm 0,234 → 0,2195. Ba bước gộp chung nên chưa biết bước nào làm mất recall. Nghi theo thứ tự: (a) γ −1 lấy quá nhiều chỗ của query yếu; (b) `min_score` 0,2 bỏ cả chunk đúng; (c) `min_chars` 200 bỏ đoạn ZH ngắn mà đáp án ZH của BTC cũng ngắn. Cách tách: nộp riêng `R2/submission/medxir-expand-nb60-drr-bge-only-ghigh-min200-submission.zip` (chỉ min200) và `nball-drr-bge-only-ghigh-min200` (cụm 3 chunk, không cắt chunk). Ở P ≈ 0,17, R ≈ 0,22, một đơn vị R đáng ≈ 2,6 đơn vị P trong F2: chỉ giữ bước cắt nào không làm giảm R.
+
 ### 9. Bài nộp hiện có (`artifacts/submission/` và `R2/submission/`)
 
 | File | Đã nộp | Điểm | Ghi chú |
 |---|---|---:|---|
-| **var-all-b1-d200-c70-x1** (`artifacts/submission/`) | Có | **0,2444** | **Mốc tốt nhất** (hướng B) |
+| **v2 nb60-d200-drr-bge-only** | Có | **0,2464** | **Mốc tốt nhất** (hướng A, corpus v2) |
+| **var-all-b1-d200-c70-x1** (`artifacts/submission/`) | Có | 0,2444 | Mốc tốt nhất hướng B |
 | ens4-prfoct-b1-d200-c70-x1 | Có | 0,2429 | |
 | ens4-b1-d200-c70-x1 | Có | 0,2410 | |
 | only8b-var-b1-d200-c70-x1 | Chưa nộp | | Ablation: bỏ 4B và 0.6B |
 | var-all-b1-d200-c50-x2 | Chưa nộp | | Ablation: cửa sổ 5 chunk, 50 cửa sổ |
 | ens4-icd02-b1-d200-c70-x1, q8-oct-bm25-b1-d200-c70-x1 | Chưa nộp | | |
 | Các bài hướng B khác từ 27/10 | Có, đã xóa file | | Điểm ở docs/EXPERIMENTS.md; dựng lại bằng `fuse_scores.py` |
-| **v2 nb60-d200** (`R2/submission/v2/`) | Có | 0,2437 | Mốc tốt nhất hướng A |
+| **v2 nb60-d200** (`R2/submission/v2/`) | Có | 0,2437 | |
 | expand nb60 (`R2/submission/chunk concat/medxir-expand-nb60-submission.zip`) | Có | 0,2235 | |
 | expand nb30 / wholedoc | Có | 0,2184 / 0,2065 | Cùng thư mục |
 | expand nb0 / nb10 | Chưa nộp | | |
@@ -763,6 +766,10 @@ Chạy Kaggle CPU, input `medxir-chunk-corpus` + output hybrid (`pool.parquet` v
 | nb60-drr-bge-only (chỉ điểm bge) | 0,2253 | 0,481 | 0,224 | 0,142 | Thay ~25,6 doc/query nhưng chỉ thêm +0,002 Doc R. Mới lấy được ~15% phần +0,046 ở hạng 200–300 |
 | nb60-drr-qwen4b-only (Qwen3-Reranker-4B, vùng 120–360, top 120 giữ nguyên) | 0,2176 | 0,457 | 0,224 | 0,142 | Doc R thấp hơn cả nb60 gốc (−0,016). Qwen-4B kém bge khi chấm cấp doc. Bỏ hướng doc rerank bằng Qwen |
 | **v2 nb60-d200** (corpus v2 2,89M chunk, BM25 vẫn v1, không doc rerank; `R2/submission/v2/`) | **0,2437** | 0,519 | 0,249 | 0,155 | Cùng cấu hình nb60, chỉ đổi corpus: +0,020 FINAL, Doc R +0,046, Chunk R +0,025. Corpus mở rộng là đòn bẩy lớn nhất tới giờ |
+| **v2 nb60-d200-drr-bge-only** (rerank doc bge 0–400, chỉ điểm bge) | **0,2464** | 0,530 | 0,249 | 0,155 | Doc F2 0,3042 (+0,005), Doc P 0,153. Doc R chỉ +0,011, chunk giữ nguyên. bge vẫn lấy được ít phần recall ở hạng 200–400 |
+| v2 nb60-drr-bge-only-glow (global-low: byte của query tự tin chuyển sang query ít chunk điểm bge ≥ 0,5, γ 0,5) | 0,2352 | 0,530 | 0,249 | 0,173 | Chunk P tăng nhưng Chunk F2 macro giảm 0,1886 → 0,1676: query tự tin mất recall (F2 cao, mất nhiều), query yếu thêm chunk gần như không thêm F2 (P thấp chặn F2). Bỏ hướng nhường chỗ cho query yếu |
+| **v2 nb60-drr-bge-only-ghigh** (ngược lại: byte dồn cho query tự tin, γ −0,5) | **0,2477** | 0,530 | 0,234 | 0,159 | Mốc tốt nhất. Chunk F2 0,1886 → 0,1908: R giảm 0,015 nhưng P tăng, F2 macro tăng vì query mạnh được thêm recall. Tiếp: γ −1,0 |
+| v2 nb60-drr-bge-only-ghigh1-min200-s20 (γ −1 + bỏ đoạn < 200 ký tự + bỏ chunk bge < 0,2, gộp 3 bước chưa thử riêng) | 0,2450 | 0,530 | 0,2195 | 0,177 | Chunk P +0,018 nhưng R −0,015 so với ghigh: Chunk F2 0,1908 → 0,1844. Ở P ≈ 0,17, R ≈ 0,22, một đơn vị R đáng ≈ 2,6 đơn vị P trong F2; cắt chunk để lấy precision là lỗ. Bước nào làm mất R chưa tách được |
 
 ### Kết luận
 
