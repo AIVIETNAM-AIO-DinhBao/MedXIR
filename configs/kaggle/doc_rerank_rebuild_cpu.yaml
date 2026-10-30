@@ -20,8 +20,9 @@ kernel:
     - faulthandler.txt
     - expand_manifest.json
     - doc_rank.parquet
-    - medxir-expand-nb60-drr-bge-only-ghigh1-min200-s20-submission.zip
-    - medxir-expand-nball-drr-bge-only-ghigh-min200-submission.zip
+    - medxir-expand-nb60-drr-bge-only-ghigh-submission.zip
+    - medxir-expand-nb60-drr-bge-only-ghigh-cover-submission.zip
+    - medxir-expand-nb30-drr-bge-only-ghigh-cover-submission.zip
   required_outputs:
     - expand_manifest.json
-    - medxir-expand-nball-drr-bge-only-ghigh-min200-submission.zip
+    - medxir-expand-nb60-drr-bge-only-ghigh-cover-submission.zip

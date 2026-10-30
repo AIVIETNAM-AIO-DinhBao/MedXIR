@@ -45,6 +45,14 @@ import pyarrow.parquet as pq
 # min_score: ranked chunks with a rerank score below it are not taken (nor their neighbours); the bytes a query
 # leaves unused go to the queries that used their whole budget, by the same confidence weights. bge scores are
 # high: at 0.2 the cut removes ~46 chunks in 16% of the queries (the unsure ones) and none elsewhere.
+# zip: 'bzip2' writes the ZIP with bzip2 instead of deflate: the 0.2477 JSON is 86.5 MB deflated, 56.5 MB with
+# bzip2 (LZMA 54.4 MB, 10x slower), so ~1.5x more text fits under the 100 MB limit. budget_scale replaces
+# BUDGET_SCALE; the size loop shrinks it until the ZIP fits. Under the limit chunk recall grows with the bytes
+# (each gold document holds ~1 reference passage, so more bytes = more documents reached).
+# cover (first, last): after the nb top chunks (with neighbours), the best pool chunk of every listed document
+# at ranks first..last that has none yet, then the rest of the pool. 30/10 (Qwen-8B, 0.2509): ranks 100-200 of
+# the document list got chunk text for 10% of the documents, ranks 50-100 for 48%, while ~15% of them are
+# relevant and a relevant document holds ~1 reference passage.
 VARIANTS = {
     'nb0': dict(nb=0), 'nb10': dict(nb=10), 'nb30': dict(nb=30), 'nb60': dict(nb=60), 'wholedoc': dict(nb='whole'),
     'nb60-d300': dict(nb=60, n_docs=300),
@@ -71,6 +79,12 @@ VARIANTS = {
                                                conf_gamma=-0.5, conf_t=0.5, min_chars=200, min_score=0.2),
     'nb60-drr-bge-only-ghigh1-min200-s20': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0,
                                                 conf_gamma=-1.0, conf_t=0.5, min_chars=200, min_score=0.2),
+    'nb60-drr-bge-only-ghigh-bz': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5,
+                                       conf_t=0.5, zip='bzip2', budget_scale=1.6),
+    'nb60-drr-bge-only-ghigh-cover': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5,
+                                          conf_t=0.5, cover=(20, 200)),
+    'nb30-drr-bge-only-ghigh-cover': dict(nb=30, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5,
+                                          conf_t=0.5, cover=(20, 200)),
     'nb60-drr-bge-only-ghigh-min200': dict(nb=60, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0, conf_gamma=-0.5,
                                            conf_t=0.5, min_chars=200),
     'nball-drr-bge-only-ghigh-min200': dict(nb=10 ** 6, doc_rr={'bge-reranker-v2-m3': 1.0}, w_base=0.0,
@@ -305,6 +319,20 @@ def confidence_budget(budget, score, gamma, threshold):
     return {qid: budget[qid] * weight[qid] * norm for qid in budget}
 
 
+def cover_order(ranked, n_head, docs, first, last, docs_of):
+    """Pool order with the best chunk of each listed document at ranks first..last moved right after the top n_head
+    chunks, unless a top chunk already belongs to it."""
+    head = ranked[:n_head]
+    seen = {d for c in head for d in docs_of(c)}
+    best = {}
+    for cid in ranked[n_head:]:
+        for doc in docs_of(cid):
+            best.setdefault(doc, cid)
+    promoted = list(dict.fromkeys(best[d] for d in docs[first:last] if d in best and d not in seen))
+    moved = set(promoted)
+    return head + promoted + [c for c in ranked[n_head:] if c not in moved]
+
+
 def chosen_bytes(chosen, rows, docs_of):
     return sum(len(rows[c]['text'].encode('utf-8')) * len(docs_of(c)) for c in chosen)
 
@@ -329,8 +357,8 @@ def score_cut_budget(budget, ctx, n_neighbour, min_score):
 def build_variants(ctx, only=None, doc_scores=None):
     ranked, base, rows, by_pos, by_text, docs_of, lang_of = (
         ctx[k] for k in ('ranked', 'base', 'rows', 'by_pos', 'by_text', 'docs_of', 'lang_of'))
-    budget = {e['id']: BUDGET_SCALE * sum(len(c['chunk_text'].encode('utf-8')) for c in e['relevant_chunks'])
-              for e in base}
+    base_bytes = {e['id']: sum(len(c['chunk_text'].encode('utf-8')) for c in e['relevant_chunks'])
+                  for e in base}
     only = ONLY if only is None else only
     manifest = {'budget_scale': BUDGET_SCALE, 'variants': {}}
     for name, spec in VARIANTS.items():
@@ -344,6 +372,7 @@ def build_variants(ctx, only=None, doc_scores=None):
                 print(name, 'skipped: no doc_rank column', absent, flush=True)
                 continue
         n_neighbour = spec['nb']
+        budget = {qid: b * spec.get('budget_scale', BUDGET_SCALE) for qid, b in base_bytes.items()}
         q_budget = (confidence_budget(budget, ctx['score'], spec['conf_gamma'], spec.get('conf_t', 0.5))
                     if spec.get('conf_gamma') else budget)
         if spec.get('min_score'):
@@ -354,12 +383,6 @@ def build_variants(ctx, only=None, doc_scores=None):
             dropped = 0
             for entry in base:
                 qid = entry['id']
-                if n_neighbour == 'whole':
-                    chosen = build_whole_docs(ranked[qid], entry['relevant_docs'], q_budget[qid] * scale,
-                                              rows, by_text, docs_of)
-                else:
-                    chosen = build_query(ranked[qid], n_neighbour, q_budget[qid] * scale, rows, by_pos, docs_of,
-                                         spec.get('quota', 0.0), ctx['score'][qid], spec.get('min_score', 0.0))
                 if spec.get('doc_rr'):
                     q_scores = doc_scores.get(qid, {})
                     candidates = list(dict.fromkeys(
@@ -373,6 +396,15 @@ def build_variants(ctx, only=None, doc_scores=None):
                 else:
                     docs = doc_list(entry['relevant_docs'], ranked[qid], docs_of, lang_of,
                                     spec.get('n_docs', 0), spec.get('doc_quota', 0.0))
+                if n_neighbour == 'whole':
+                    chosen = build_whole_docs(ranked[qid], entry['relevant_docs'], q_budget[qid] * scale,
+                                              rows, by_text, docs_of)
+                elif spec.get('cover'):
+                    order = cover_order(ranked[qid], n_neighbour, docs, *spec['cover'], docs_of)
+                    chosen = build_query(order, n_neighbour, q_budget[qid] * scale, rows, by_pos, docs_of)
+                else:
+                    chosen = build_query(ranked[qid], n_neighbour, q_budget[qid] * scale, rows, by_pos, docs_of,
+                                         spec.get('quota', 0.0), ctx['score'][qid], spec.get('min_score', 0.0))
                 for c in chosen:
                     size = len(rows[c]['text'].encode('utf-8'))
                     all_bytes += size
@@ -395,7 +427,8 @@ def build_variants(ctx, only=None, doc_scores=None):
                 submission.append(dict(id=qid, relevant_docs=docs, relevant_chunks=chunks))
             zip_path = OUT / f'medxir-expand-{name}-submission.zip'
             json_name = zip_path.name.replace('.zip', '.json')
-            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            method = zipfile.ZIP_BZIP2 if spec.get('zip') == 'bzip2' else zipfile.ZIP_DEFLATED
+            with zipfile.ZipFile(zip_path, 'w', compression=method, compresslevel=9) as archive:
                 archive.writestr(json_name, json.dumps(submission, ensure_ascii=False, separators=(',', ':')))
             mb = zip_path.stat().st_size / 1e6
             if mb <= MAX_ZIP_MB:

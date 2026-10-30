@@ -51,7 +51,7 @@ LEAD_CHARS = 400            # characters of the document start (title / lead) sh
 DOC_CHUNKS = 1              # best pool chunks of the document shown; 2 doubles the pair length (Qwen ~4 h)
 DOC_MAX_TOKENS = 1024 if DOC_CHUNKS > 1 else 512   # pair length cap for the reranker
 QWEN_BATCH = 16
-BUILD = ['nb60-drr-bge-only-ghigh1-min200-s20', 'nball-drr-bge-only-ghigh-min200']
+BUILD = ['nb60-drr-bge-only-ghigh', 'nb60-drr-bge-only-ghigh-cover', 'nb30-drr-bge-only-ghigh-cover']
 # v2 30/10: bge-only 0.2464, glow 0.2352, ghigh 0.2477
 QUERY_LIMIT = 0             # >0: first N queries only (speed check; doc_rank.parquet written, no ZIPs)
 """

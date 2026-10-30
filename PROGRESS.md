@@ -8,7 +8,7 @@
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,2477** (`v2 nb60-drr-bge-only-ghigh`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2509** (`v2 Qwen3-8B nb60-d200-drr-bge-only`, hướng A, corpus v2). Hướng B (corpus v1): 0,2444 (`var-all-b1-d200-c70-x1`).
 - Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437 → v2 nb60-d200-drr-bge-only 0,2464 → ghigh 0,2477.
 - Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444.
 - **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
@@ -75,6 +75,8 @@ Mục cũ (chọn chunk từ pool top-500, gộp điểm doc, trọng số BM25)
 6. **Probe tỷ lệ ZH/EN:** ép ≥ ~20% chunk ZH/EN.
 7. **Embed tiêu đề doc VI/ZH** (bỏ hậu tố tên trang như "| Sức Khỏe Cộng Đồng"; EN đã có tiêu đề ở đầu văn bản). Cột `title` trong `Kaggle-Group/archive.zip` → `docs/<lang>/part-v1-*.parquet`.
 8. ICD (Octen): để sau. Cân nhắc tập dev ~100 query nhãn LLM để thử offline.
+
+**Phân tích chunk recall (30/10 tối).** (1) Bản wholedoc nộp trọn ~34 doc đầu bảng: Chunk P 0,21 ≈ tỉ lệ doc đúng trong top 34 (BM25 Baseline của BTC: ~35 doc, P 0,88). (2) Mỗi doc đúng chứa ~1 đoạn đáp án (~58 doc đúng, ~50 đoạn/query), nên Chunk R tăng theo số doc đúng được chạm tới; nb60 chạm 83 doc/query, định vị đúng đoạn ở ~75% doc đúng chạm tới. (3) Dưới giới hạn 100 MB, Chunk R gần như bão hòa ~0,22–0,25 (nb30/nb60/x1-c70) → cần thêm byte. (4) Cùng JSON bản 0,2477: ZIP deflate 86,5 MB, **ZIP bzip2 56,5 MB**, ZIP LZMA 54,4 MB → nén bzip2 nhét được ~1,55× văn bản. Biến thể `nb60-drr-bge-only-ghigh-bz` (bzip2, budget_scale 1,6). Chưa biết dashboard có đọc ZIP bzip2 không: file thử `R2/submission/medxir-expand-nb60-drr-bge-only-ghigh-BZIP2TEST-submission.zip` (cùng nội dung 0,2477).
 
 **Nghi vấn chưa tách (30/10), thử sau.** Bản gộp `ghigh1-min200-s20` (0,2450) thua `ghigh` (0,2477) vì Chunk R giảm 0,234 → 0,2195. Ba bước gộp chung nên chưa biết bước nào làm mất recall. Nghi theo thứ tự: (a) γ −1 lấy quá nhiều chỗ của query yếu; (b) `min_score` 0,2 bỏ cả chunk đúng; (c) `min_chars` 200 bỏ đoạn ZH ngắn mà đáp án ZH của BTC cũng ngắn. Cách tách: nộp riêng `R2/submission/medxir-expand-nb60-drr-bge-only-ghigh-min200-submission.zip` (chỉ min200) và `nball-drr-bge-only-ghigh-min200` (cụm 3 chunk, không cắt chunk). Ở P ≈ 0,17, R ≈ 0,22, một đơn vị R đáng ≈ 2,6 đơn vị P trong F2: chỉ giữ bước cắt nào không làm giảm R.
 
@@ -769,6 +771,7 @@ Chạy Kaggle CPU, input `medxir-chunk-corpus` + output hybrid (`pool.parquet` v
 | **v2 nb60-d200-drr-bge-only** (rerank doc bge 0–400, chỉ điểm bge) | **0,2464** | 0,530 | 0,249 | 0,155 | Doc F2 0,3042 (+0,005), Doc P 0,153. Doc R chỉ +0,011, chunk giữ nguyên. bge vẫn lấy được ít phần recall ở hạng 200–400 |
 | v2 nb60-drr-bge-only-glow (global-low: byte của query tự tin chuyển sang query ít chunk điểm bge ≥ 0,5, γ 0,5) | 0,2352 | 0,530 | 0,249 | 0,173 | Chunk P tăng nhưng Chunk F2 macro giảm 0,1886 → 0,1676: query tự tin mất recall (F2 cao, mất nhiều), query yếu thêm chunk gần như không thêm F2 (P thấp chặn F2). Bỏ hướng nhường chỗ cho query yếu |
 | **v2 nb60-drr-bge-only-ghigh** (ngược lại: byte dồn cho query tự tin, γ −0,5) | **0,2477** | 0,530 | 0,234 | 0,159 | Mốc tốt nhất. Chunk F2 0,1886 → 0,1908: R giảm 0,015 nhưng P tăng, F2 macro tăng vì query mạnh được thêm recall. Tiếp: γ −1,0 |
+| **v2 Qwen3-8B hybrid nb60-d200-drr-bge-only** (`R2/submission/qwen8b/`, model đơn, BM25 v2) | **0,2509** | 0,544 | 0,2509 | 0,155 | Mốc tốt nhất. So với 4B: Doc R +0,014, Doc F2 0,3131; Chunk R gần như không đổi → chunk recall bị giới hạn ở cách chọn đoạn. Hạng 100–200 của danh sách doc chỉ 10% có đoạn được nộp, hạng 50–100 48%: biến thể `cover` |
 | v2 nb60-drr-bge-only-ghigh1-min200-s20 (γ −1 + bỏ đoạn < 200 ký tự + bỏ chunk bge < 0,2, gộp 3 bước chưa thử riêng) | 0,2450 | 0,530 | 0,2195 | 0,177 | Chunk P +0,018 nhưng R −0,015 so với ghigh: Chunk F2 0,1908 → 0,1844. Ở P ≈ 0,17, R ≈ 0,22, một đơn vị R đáng ≈ 2,6 đơn vị P trong F2; cắt chunk để lấy precision là lỗ. Bước nào làm mất R chưa tách được |
 
 ### Kết luận
