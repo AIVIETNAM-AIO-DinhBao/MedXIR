@@ -1,0 +1,40 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-octen8b-repack-20261030",
+    "title": "medxir-octen8b-repack-20261030",
+    "code_file": "src/notebooks/kaggle_octen8b_repack.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": false,
+    "enable_internet": false,
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus-v2"
+    ],
+    "kernel_sources": [
+      "ntklinhfitus/medxir-octen8b-additions-20261030"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "ntklinhfitus/medxir-octen8b-additions-20261030",
+        "version": 1,
+        "manifest": "incremental_embed_manifest.json",
+        "manifest_sha256": "ad4b396ce3e2ae3055afb21370c8e115aae8eebdb30f7d38c2e54868a58c6a96"
+      }
+    ],
+    "timeout_seconds": 3600,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "vector_repack_validation.json"
+    ],
+    "required_outputs": [
+      "vector_repack_validation.json"
+    ],
+    "metrics_file": "vector_repack_validation.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      }
+    ]
+  }
+}

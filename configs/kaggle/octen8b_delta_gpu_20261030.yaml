@@ -1,0 +1,58 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-octen8b-additions-20261030",
+    "title": "medxir-octen8b-additions-20261030",
+    "code_file": "src/notebooks/kaggle_octen8b_delta_gpu.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": true,
+    "enable_internet": false,
+    "kernel_sources": [
+      "ntklinhfitus/medxir-octen8b-delta-plan-20261030",
+      "boinhbo/medxir-package-octen8b"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "ntklinhfitus/medxir-octen8b-delta-plan-20261030",
+        "version": 1,
+        "manifest": "octen8b_additions_plan/embedding_plan_manifest.json",
+        "manifest_sha256": "3da94b191f6b56310d45c9e3cd7ccaf9c47b111d8eb77fc6571c890b8e556eb4"
+      },
+      {
+        "kernel": "boinhbo/medxir-package-octen8b",
+        "version": 1,
+        "manifest": "models/MODELS.json",
+        "manifest_sha256": "349e9ee986d29520c2ec9eea9a20b4d0ab15696ae5a50185c44e73f5d8f98b39"
+      }
+    ],
+    "dataset_sources": [],
+    "timeout_seconds": 21600,
+    "poll_interval_seconds": 60,
+    "metrics_file": "incremental_embed_manifest.json",
+    "fetch_files": [
+      "incremental_embed_manifest.json"
+    ],
+    "required_outputs": [
+      "incremental_embed_manifest.json"
+    ],
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      },
+      {
+        "path": "total_rows",
+        "value": 270405
+      },
+      {
+        "path": "nan_rows",
+        "value": 0
+      }
+    ],
+    "machine_shape": "NvidiaRtxPro6000",
+    "expected_hardware_contains": "6000",
+    "competition_sources": [
+      "arc-prize-2026-arc-agi-3"
+    ]
+  }
+}

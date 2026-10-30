@@ -1,0 +1,58 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-qwen8b-delta-plan-20261030",
+    "title": "medxir-qwen8b-delta-plan-20261030",
+    "code_file": "src/notebooks/kaggle_qwen8b_delta_plan.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": false,
+    "enable_internet": false,
+    "kernel_sources": [
+      "dinhbaobao/medxir-embed-corpus-qwen8b-s0",
+      "dinhbaobao/medxir-embed-corpus-qwen8b-s1",
+      "dinhbaobao/medxir-embed-corpus-qwen8b-s2",
+      "ntklinhfitus/medxir-recovery-finalize-20261029-v2"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "dinhbaobao/medxir-embed-corpus-qwen8b-s0",
+        "version": 1,
+        "manifest": "embed_manifest.json",
+        "manifest_sha256": "1813b3ef1ffe7f2e51c30e593051b1914b14b55ab02c4167c4a4c85518123b7c"
+      },
+      {
+        "kernel": "dinhbaobao/medxir-embed-corpus-qwen8b-s1",
+        "version": 1,
+        "manifest": "embed_manifest.json",
+        "manifest_sha256": "e03b5a8b25da696eebb0746ee145c8db8021b1a157e2d5289ec0120d385be708"
+      },
+      {
+        "kernel": "dinhbaobao/medxir-embed-corpus-qwen8b-s2",
+        "version": 2,
+        "manifest": "embed_manifest.json",
+        "manifest_sha256": "56ef525594b9aa4f734243713b6b86fe5d16e15001f748b62537b38209e0f6a0"
+      },
+      {
+        "kernel": "ntklinhfitus/medxir-recovery-finalize-20261029-v2",
+        "version": 1,
+        "manifest": "recovery_release_20261029_v2/release_manifest.json",
+        "manifest_sha256": "1e6e2e710e6355d769d8fad7cc57e21c9400d6d029daab91058438d5f3e8f88f"
+      }
+    ],
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus"
+    ],
+    "timeout_seconds": 5400,
+    "poll_interval_seconds": 30,
+    "metrics_file": "qwen8b_additions_plan/embedding_plan_manifest.json",
+    "fetch_files": [
+      "qwen8b_additions_plan/embedding_plan_manifest.json",
+      "qwen8b_additions_plan/reuse_provenance.parquet",
+      "qwen8b_additions_plan/golden_texts.parquet"
+    ],
+    "required_outputs": [
+      "qwen8b_additions_plan/embedding_plan_manifest.json"
+    ],
+    "json_checks": []
+  }
+}

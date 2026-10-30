@@ -67,6 +67,18 @@ def rrf(lists, k=60):
     return sorted(score.items(), key=lambda item: (-item[1], first[item[0]]))
 
 
+def model_candidate_lists(results, weights, qi, sub_weight, prf_weight):
+    """One RRF stage: model weights multiply full/sub/PRF lists; BM25 is added once by caller."""
+    lists = []
+    for key, weight in weights.items():
+        result = results[key]
+        lists.append((list(result['full_ids'][qi]), weight))
+        lists.extend((list(ids), weight * sub_weight) for ids in result['sub_lists'][qi])
+        if result['prf_ids'] is not None:
+            lists.append((list(result['prf_ids'][qi]), weight * prf_weight))
+    return lists
+
+
 def doc_ranking(scored, docs_of, agg='max'):
     """Documents of the scored chunks ([(chunk id, score)], best first), best document first.
 

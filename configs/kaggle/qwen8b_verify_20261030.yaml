@@ -1,0 +1,32 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-qwen8b-verify-20261030",
+    "title": "medxir-qwen8b-verify-20261030",
+    "code_file": "src/notebooks/kaggle_qwen8b_verify.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": false,
+    "enable_internet": false,
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus-v2",
+      "ntklinhfitus/medxir-vectors-qwen3-8b-additions"
+    ],
+    "kernel_sources": [],
+    "kernel_source_expectations": [],
+    "timeout_seconds": 3600,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "published_vectors_validation.json"
+    ],
+    "required_outputs": [
+      "published_vectors_validation.json"
+    ],
+    "metrics_file": "published_vectors_validation.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      }
+    ]
+  }
+}

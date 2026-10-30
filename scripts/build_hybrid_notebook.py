@@ -17,6 +17,7 @@ from pathlib import Path
 
 from build_chunk_notebook import copied_source, notebook
 from build_retrieval_notebook import CODE_HELPERS, CODE_REPORT, guarded
+from hybrid_embedding_cells import ENCODE, LOAD_VECTORS, SEARCH
 
 INTRO = """
 # MedXIR hybrid retrieval: query variants + dense + PRF + BM25 + rerank
@@ -30,21 +31,43 @@ kernel outputs `medxir-package-models`, `medxir-embed-corpus-4b-s0/s1/s2`,
 Attach one full chunk corpus and one copy of each vector part. Share the private ntklinhfitus
 datasets with the account running this notebook before starting it.
 
-Steps: input/ID preflight -> query variants -> encode (Qwen3-Embedding-4B) -> exact search over the 2.89M chunk vectors held on
+Model selection: `EMBEDDING_MODEL = 'qwen4b' | 'qwen8b' | 'octen8b'` for one model.
+For weighted RRF across models, set `USE_MODEL_FUSION=True` and edit `MODEL_WEIGHTS`.
+Weights are normalized to sum to one; zero disables that model and its inputs. BM25 is added once.
+With reranking on, model weights determine which candidates reach the reranker.
+Each model is encoded, searched in its own space (2560/4096/4096 dimensions), then fused by chunk ID.
+Vector matrices are loaded/searched/released sequentially, with the largest full matrix about 23.7 GB.
+
+Additional inputs for Qwen8B: `boinhbo/medxir-package-qwen8b`,
+`dinhbaobao/medxir-embed-corpus-qwen8b-s0/s1/s2`,
+`ntklinhfitus/medxir-vectors-qwen3-8b-additions`.
+Additional inputs for Octen8B: `boinhbo/medxir-package-octen8b`,
+`boinhbo/medxir-embed-corpus-octen8b-s0/s1/s2`,
+`ntklinhfitus/medxir-vectors-octen-8b-additions`.
+Only active models need these inputs. `ENCODE_HERE=False` requires model-labelled variant caches
+written by this notebook; old 1200-query outputs do not include custom instructions or sub-queries.
+
+Steps: input/ID preflight -> query variants -> encode each active embedding model -> exact search over its 2.89M chunk vectors held on
 the GPU -> PRF search -> BM25 candidates -> weighted RRF pool -> rerank -> document scores (max/top3) ->
 submission ZIP (kept under 100 MB) + `pool.parquet` to rebuild variants offline without a GPU ->
 extra ZIPs `medxir-expand-nb60-d200[-drr-bge|-drr-bge-only]-submission.zip`: neighbour spans of the top
 EXPAND_NB chunks, documents optionally re-ordered by bge-reranker-v2-m3 (DOC_RERANK, +~25 min for 480k pairs).
 
-Time with every switch on (bge reranker, POOL_MAX 600): about 45-75 min. Rerank ~720k pairs at ~530 pairs/s
+Historical single-4B time with every switch on (bge reranker, POOL_MAX 600): about 45-75 min. Rerank ~720k pairs at ~530 pairs/s
 (benchmark 26/10) is 20-30 min; the 4B model load (4-9 min) and the 14.8 GB vector read are most of the rest.
-Without the reranker: about 20-45 min. Progress and the rerank ETA are written to progress.txt.
+Without the reranker: about 20-45 min for 4B. More models add encoding and vector loading/search time;
+these are historical estimates, not multi-model GPU benchmarks. Progress and rerank ETA go to progress.txt.
 BM25 candidates: rerun `kaggle_bm25_vi` on corpus v2 (its bm25_manifest.json states the corpus, checked here); with
 the v1 run, chunks added in v2 enter the pool through dense search only.
 """
 
 CONFIG = r"""
 # ===================== Config: the only cell to edit =====================
+EMBEDDING_MODEL = 'qwen4b'   # single model: 'qwen4b', 'qwen8b', 'octen8b'
+USE_MODEL_FUSION = False    # True: use MODEL_WEIGHTS below; EMBEDDING_MODEL is then ignored
+MODEL_WEIGHTS = {'qwen4b': 1.0, 'qwen8b': 1.0, 'octen8b': 1.0}
+# Weighted RRF, normalized to sum=1. Zero skips a model and its inputs.
+# With USE_RERANK=True these weights select the candidate pool; the reranker then orders that pool.
 USE_QUERY_SPLIT = True      # rule-based cleanup + split of long queries; each sub-query is searched on its own
 USE_CUSTOM_INSTRUCT = True  # task-specific Qwen3-Embedding instruction instead of the model-card default
 USE_PRF = True              # pseudo-relevance feedback: query moved toward its top PRF_K chunks, searched again
@@ -102,8 +125,8 @@ import pyarrow.parquet as pq
 import torch
 
 CONFIG = {name: value for name, value in globals().items()
-          if name.isupper() and name not in {'OUT', 'T0', 'PROGRESS', 'FAULT_FILE', 'FAILED'}
-          and isinstance(value, (bool, int, float, str))}
+          if name.isupper() and name not in {'OUT', 'T0', 'PROGRESS', 'FAULT_FILE', 'FAILED', 'CONFIG', 'EMBEDDING_SPECS'}
+          and isinstance(value, (bool, int, float, str, dict))}
 TIMINGS = {}
 
 
@@ -125,16 +148,36 @@ assert CHUNK_MANIFEST_PATH.is_file(), f'Missing corpus manifest: {CHUNK_MANIFEST
 CHUNK_FILES = sorted(glob.glob('/kaggle/input/**/chunks/*/part-*.parquet', recursive=True))
 VECTOR_FILES = sorted(p for p in glob.glob('/kaggle/input/**/vectors/*.npy', recursive=True) if not p.endswith('.tmp.npy'))
 SEARCH_LANGS = [lang.strip() for lang in LANGS.split(',') if lang.strip()]
-CHUNK_PATH, VECTOR_PATH, INPUT_PROVENANCE = validate_hybrid_inputs(
-    CHUNK_FILES, VECTOR_FILES, SEARCH_LANGS, CHUNK_MANIFEST_PATH, EXPECTED_CORPUS_VERSION, progress=note)
+ACTIVE_MODEL_WEIGHTS = embedding_weights(EMBEDDING_MODEL, USE_MODEL_FUSION, MODEL_WEIGHTS)
+MODEL_VECTOR_FILES = group_embedding_vectors(VECTOR_FILES, ACTIVE_MODEL_WEIGHTS)
+MODEL_VECTOR_PATHS, MODEL_INPUTS, MODEL_REVISIONS = {}, {}, {}
+for model_key in ACTIVE_MODEL_WEIGHTS:
+    CHUNK_PATH, paths, info = validate_hybrid_inputs(
+        CHUNK_FILES, MODEL_VECTOR_FILES[model_key], SEARCH_LANGS, CHUNK_MANIFEST_PATH,
+        EXPECTED_CORPUS_VERSION, progress=note, model_key=model_key)
+    MODEL_VECTOR_PATHS[model_key], MODEL_INPUTS[model_key] = paths, info
+    revisions = {m['model_revision'] for m in info['vector_manifests'] if m['model_revision']}
+    assert len(revisions) <= 1, f'{model_key}: vector sources use different revisions'
+    MODEL_REVISIONS[model_key] = next(iter(revisions), None)
+    note(f'{model_key}: {info["part_count"]} parts, {info["vector_count"]:,} vectors, '
+         f'{info["vector_count"] * info["dim"] * 2 / 1e9:.2f} GB fp16')
+INPUT_PROVENANCE = dict(next(iter(MODEL_INPUTS.values())), models=MODEL_INPUTS,
+                        fusion='weighted_rrf' if len(ACTIVE_MODEL_WEIGHTS) > 1 else 'single_model',
+                        normalized_model_weights=ACTIVE_MODEL_WEIGHTS)
 CHUNK_FILES = [CHUNK_PATH[key] for key in sorted(CHUNK_PATH)]
-note(f'inputs verified: {INPUT_PROVENANCE["part_count"]} parts, {INPUT_PROVENANCE["vector_count"]:,} vectors, '
-     f'{INPUT_PROVENANCE["vector_count"] * 2560 * 2 / 1e9:.2f} GB fp16; languages={SEARCH_LANGS}')
+note(f'active embedding weights: {ACTIVE_MODEL_WEIGHTS}; languages={SEARCH_LANGS}')
 BM25_ACTIVE = USE_BM25 and 'vi' in SEARCH_LANGS
 BM25_PROVENANCE = dict(requested=USE_BM25, active=BM25_ACTIVE, corpus_version=BM25_CORPUS_VERSION,
                        coverage='not_used', candidates_path=None)
+MODEL_PATHS = {}
 if ENCODE_HERE:
-    MODEL_PATH = one_match('/kaggle/input/**/Qwen3-Embedding-4B/config.json', 'packaged Qwen3-Embedding-4B').parent
+    for model_key in ACTIVE_MODEL_WEIGHTS:
+        spec = EMBEDDING_SPECS[model_key]
+        path = one_match(f'/kaggle/input/**/{spec["directory"]}/config.json', f'packaged {model_key}').parent
+        package = json.loads((path.parent / 'MODELS.json').read_text(encoding='utf-8'))['models'][spec['model']]
+        assert MODEL_REVISIONS[model_key] is None or package['sha'] == MODEL_REVISIONS[model_key], f'{model_key}: query model / document revision mismatch'
+        MODEL_REVISIONS[model_key] = package['sha']
+        MODEL_PATHS[model_key] = path
 if BM25_ACTIVE:
     BM25_PATH = one_match('/kaggle/input/**/vi-candidates-k500.npz', 'BM25 candidates (medxir-bm25-vi)')
     bm25_manifest = BM25_PATH.with_name('bm25_manifest.json')
@@ -165,7 +208,7 @@ print(subprocess.run(['nvidia-smi', '--query-gpu=index,name,memory.total,driver_
                      capture_output=True, text=True).stdout)
 GPU_NAME = torch.cuda.get_device_name(0)
 assert '6000' in GPU_NAME, f'Expected RTX Pro 6000, got {GPU_NAME!r}'
-print('GPU:', GPU_NAME, '| queries:', len(queries), '| vector parts:', list(VECTOR_PATH))
+print('GPU:', GPU_NAME, '| queries:', len(queries), '| model vector parts:', {k: list(v) for k, v in MODEL_VECTOR_PATHS.items()})
 print(json.dumps(CONFIG, ensure_ascii=False, indent=1))
 """
 
@@ -185,144 +228,6 @@ print(f'{len(VARIANTS)} texts to encode: {len(QUERY_TEXT)} full, {n_sub} sub-que
       f'({len({v["qi"] for v in VARIANTS if v["kind"] == "sub"})} queries split)')
 """
 
-ENCODE = r"""
-started = time.perf_counter()
-if ENCODE_HERE:
-    from transformers import AutoModel, AutoTokenizer
-    import torch.nn.functional as F
-
-    os.environ['HF_HUB_OFFLINE'] = '1'
-    tok = AutoTokenizer.from_pretrained(str(MODEL_PATH))
-    tok.padding_side = 'left'
-    model = AutoModel.from_pretrained(str(MODEL_PATH), torch_dtype=torch.bfloat16, attn_implementation='sdpa').cuda().eval()
-    note(f'embedding model loaded in {time.perf_counter() - started:.0f}s')
-
-    def last_token_pool(hidden, mask):
-        if mask[:, -1].sum() == mask.shape[0]:
-            return hidden[:, -1]
-        lengths = mask.sum(dim=1) - 1
-        return hidden[torch.arange(hidden.shape[0], device=hidden.device), lengths]
-
-    @torch.inference_mode()
-    def encode(texts, batch=16):
-        tokenized = tok(texts, truncation=True, max_length=1024)['input_ids']
-        order = np.argsort([-len(row) for row in tokenized], kind='stable')
-        vectors = np.empty((len(texts), model.config.hidden_size), dtype=np.float32)
-        for start in range(0, len(order), batch):
-            index = order[start:start + batch]
-            enc = tok.pad({'input_ids': [tokenized[i] for i in index]}, return_tensors='pt').to('cuda')
-            hidden = model(input_ids=enc['input_ids'], attention_mask=enc['attention_mask'], use_cache=False).last_hidden_state
-            vectors[index] = F.normalize(last_token_pool(hidden, enc['attention_mask']).float(), p=2, dim=1).cpu().numpy()
-        return vectors
-
-    VARIANT_VECTORS = encode([f'Instruct: {TASK}\nQuery:{v["text"]}' for v in VARIANTS])
-    del model, tok
-    torch.cuda.empty_cache()
-    np.save(OUT / 'query_variant_vectors.npy', VARIANT_VECTORS)
-else:
-    saved = json.loads(one_match('/kaggle/input/**/query_variants.json', 'earlier query_variants.json').read_text(encoding='utf-8'))
-    assert saved['variants'] == VARIANTS and saved['task'] == TASK, 'attached variants differ from this config'
-    VARIANT_VECTORS = np.load(one_match('/kaggle/input/**/query_variant_vectors.npy', 'earlier variant vectors'))
-assert VARIANT_VECTORS.shape == (len(VARIANTS), 2560) and np.isfinite(VARIANT_VECTORS).all()
-TIMINGS['encode_s'] = round(time.perf_counter() - started, 1)
-"""
-
-LOAD_VECTORS = r"""
-# Selected parts stay on the GPU as float16 (all v2: 2.89M x 2560 = 14.8 GB), so the full, sub and PRF
-# searches read /kaggle/input once. Blocks of 32k rows through mmap: no 1-3 GB single read.
-READ_ROWS = 32768
-started = time.perf_counter()
-PART_KEYS = sorted(VECTOR_PATH)
-PARTS, IDS = [], []
-for key in PART_KEYS:
-    t0 = time.perf_counter()
-    array = np.load(VECTOR_PATH[key], mmap_mode='r', allow_pickle=False)
-    assert array.dtype == np.float16 and array.shape[1] == 2560, (key, array.dtype, array.shape)
-    gpu = torch.empty(array.shape, dtype=torch.float16, device='cuda')
-    for start in range(0, array.shape[0], READ_ROWS):
-        gpu[start:start + READ_ROWS] = torch.from_numpy(np.array(array[start:start + READ_ROWS])).cuda()
-    del array
-    ids_path = Path(VECTOR_PATH[key]).with_name(f'{key}-ids.parquet')
-    ids = pq.read_table(ids_path, columns=['chunk_id']).column('chunk_id').to_numpy()
-    assert len(ids) == gpu.shape[0], key
-    PARTS.append(gpu)
-    IDS.append(ids)
-    seconds = time.perf_counter() - t0
-    note(f'{key}: {gpu.shape[0]:,} rows on GPU in {seconds:.0f}s ({gpu.numel() * 2 / 1e6 / max(seconds, 1e-9):.0f} MB/s)')
-OFFSETS = np.cumsum([0] + [p.shape[0] for p in PARTS])
-ALL_IDS = np.concatenate(IDS)
-del IDS
-assert len(set(ALL_IDS.tolist())) == len(ALL_IDS), 'chunk_id repeated across vector parts'
-TIMINGS['load_vectors_s'] = round(time.perf_counter() - started, 1)
-"""
-
-SEARCH = r"""
-torch.backends.cuda.matmul.allow_tf32 = SEARCH_TF32
-ROW_BLOCK, QUERY_BATCH = 262144, 1024
-
-
-@torch.inference_mode()
-def search(query_vectors, k):
-    # Exact inner product over every part; returns (scores, global row) shaped (queries, k), best first.
-    q = torch.from_numpy(np.ascontiguousarray(query_vectors, dtype=np.float32)).cuda()
-    best_s = torch.full((len(q), k), -float('inf'), device='cuda')
-    best_i = torch.full((len(q), k), -1, dtype=torch.int64, device='cuda')
-    for part, offset in zip(PARTS, OFFSETS[:-1]):
-        for row in range(0, part.shape[0], ROW_BLOCK):
-            block = part[row:row + ROW_BLOCK].float()
-            for qs in range(0, len(q), QUERY_BATCH):
-                scores = q[qs:qs + QUERY_BATCH] @ block.T
-                top_s, top_i = torch.topk(scores, min(k, scores.shape[1]), dim=1)
-                cat_s = torch.cat([best_s[qs:qs + QUERY_BATCH], top_s], dim=1)
-                cat_i = torch.cat([best_i[qs:qs + QUERY_BATCH], top_i + int(offset) + row], dim=1)
-                keep_s, order = torch.topk(cat_s, k, dim=1)
-                best_s[qs:qs + QUERY_BATCH] = keep_s
-                best_i[qs:qs + QUERY_BATCH] = torch.gather(cat_i, 1, order)
-            del block
-    return best_s.cpu().numpy(), best_i.cpu().numpy()
-
-
-def gather_vectors(rows):
-    # float32 vectors of global rows (any shape), read from the GPU-resident parts.
-    flat = np.asarray(rows).ravel()
-    part_of = np.searchsorted(OFFSETS, flat, side='right') - 1
-    out = torch.empty((len(flat), 2560), dtype=torch.float32, device='cuda')
-    for p in np.unique(part_of):
-        mask = np.flatnonzero(part_of == p)
-        local = torch.from_numpy(flat[mask] - OFFSETS[p]).cuda()
-        out[torch.from_numpy(mask).cuda()] = PARTS[p].index_select(0, local).float()
-    return out.view(*np.shape(rows), 2560)
-
-
-started = time.perf_counter()
-kinds = np.array([v['kind'] for v in VARIANTS])
-owner = np.array([v['qi'] for v in VARIANTS])
-d_scores, d_rows = search(VARIANT_VECTORS, DENSE_K)
-note(f'dense search: {len(VARIANTS)} vectors in {time.perf_counter() - started:.0f}s')
-FULL = np.flatnonzero(kinds == 'full')
-assert (owner[FULL] == np.arange(len(QUERY_TEXT))).all()
-DENSE_FULL_IDS = ALL_IDS[d_rows[FULL]]               # (queries, DENSE_K) chunk ids, best first
-DENSE_FULL_SCORES = d_scores[FULL]
-SUB_LISTS = [[] for _ in QUERY_TEXT]
-for i in np.flatnonzero(kinds == 'sub'):
-    SUB_LISTS[owner[i]].append(ALL_IDS[d_rows[i, :SUB_K]])
-
-PRF_IDS = None
-if USE_PRF:
-    t0 = time.perf_counter()
-    with torch.inference_mode():
-        feedback = gather_vectors(d_rows[FULL, :PRF_K]).mean(dim=1)
-        q = torch.from_numpy(VARIANT_VECTORS[FULL]).cuda()
-        prf = torch.nn.functional.normalize((1 - PRF_ALPHA) * q + PRF_ALPHA * feedback, p=2, dim=1).cpu().numpy()
-    _, prf_rows = search(prf, PRF_KEEP)
-    PRF_IDS = ALL_IDS[prf_rows]
-    note(f'PRF search in {time.perf_counter() - t0:.0f}s')
-
-del PARTS
-torch.cuda.empty_cache()
-TIMINGS['search_s'] = round(time.perf_counter() - started, 1)
-"""
-
 BM25 = r"""
 BM25_IDS = [[] for _ in QUERY_TEXT]
 if BM25_ACTIVE:
@@ -340,14 +245,11 @@ if BM25_ACTIVE:
 """
 
 FUSE = r"""
-# Weighted RRF over the candidate lists; the pool is what gets a final score (reranked when USE_RERANK).
-ONLY_DENSE = not (USE_QUERY_SPLIT or USE_PRF or BM25_ACTIVE)
+# One weighted RRF stage across all model full/sub/PRF lists; BM25 appears once.
+ONLY_DENSE = len(ACTIVE_MODEL_WEIGHTS) == 1 and not (USE_QUERY_SPLIT or USE_PRF or BM25_ACTIVE)
 FUSED, POOLS = [], []
 for qi in range(len(QUERY_TEXT)):
-    lists = [(DENSE_FULL_IDS[qi].tolist(), 1.0)]
-    lists += [(ids.tolist(), W_SUB) for ids in SUB_LISTS[qi]]
-    if PRF_IDS is not None:
-        lists.append((PRF_IDS[qi].tolist(), W_PRF))
+    lists = model_candidate_lists(MODEL_RESULTS, ACTIVE_MODEL_WEIGHTS, qi, W_SUB, W_PRF)
     if len(BM25_IDS[qi]):
         lists.append((list(BM25_IDS[qi]), W_BM25))
     fused = rrf(lists, RRF_K)
@@ -642,7 +544,7 @@ CELLS = [
     ('code', guarded('variants', VARIANTS)),
     ('md', '## 3. Encode with Qwen3-Embedding-4B (USE_CUSTOM_INSTRUCT picks the instruction)'),
     ('code', guarded('encode', ENCODE)),
-    ('md', '## 4. Load the selected vector parts onto the GPU'),
+    ('md', '## 4. Configure sequential vector loading (one model at a time)'),
     ('code', guarded('load_vectors', LOAD_VECTORS)),
     ('md', '## 5. Exact dense search: full query, sub-queries, PRF (USE_PRF)'),
     ('code', guarded('search', SEARCH)),

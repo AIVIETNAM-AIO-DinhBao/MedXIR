@@ -1,7 +1,8 @@
 # Hybrid retrieval (scripts/build_hybrid_notebook.py): query variants, dense search, PRF, BM25, rerank, submission.
 # Switches are in the notebook's first code cell. RTX Pro 6000 is offered only with the competition attached
 # and Internet OFF. Baseline vector outputs plus the additions dataset are read with mmap in blocks.
-# Share the two private ntklinhfitus datasets with boinhbo before running this config.
+# All three models are attached; only models enabled in the config cell are loaded.
+# Share the private ntklinhfitus datasets with boinhbo before running this config.
 kernel:
   id: boinhbo/medxir-hybrid-retrieval
   title: medxir hybrid retrieval
@@ -17,12 +18,22 @@ kernel:
     - boinhbo/medxir-embed-corpus-4b-s0
     - boinhbo/medxir-embed-corpus-4b-s1
     - boinhbo/medxir-embed-corpus-4b-s2
+    - boinhbo/medxir-package-qwen8b
+    - dinhbaobao/medxir-embed-corpus-qwen8b-s0
+    - dinhbaobao/medxir-embed-corpus-qwen8b-s1
+    - dinhbaobao/medxir-embed-corpus-qwen8b-s2
+    - boinhbo/medxir-package-octen8b
+    - boinhbo/medxir-embed-corpus-octen8b-s0
+    - boinhbo/medxir-embed-corpus-octen8b-s1
+    - boinhbo/medxir-embed-corpus-octen8b-s2
     - ntklinhfitus/medxir-bm25-vi-v2
     - boinhbo/medxir-package-rerankers
   dataset_sources:
     - boinhbo/medxir-retrieval-inputs
     - ntklinhfitus/medxir-chunk-corpus-v2
     - ntklinhfitus/medxir-vectors-qwen3-4b-additions
+    - ntklinhfitus/medxir-vectors-qwen3-8b-additions
+    - ntklinhfitus/medxir-vectors-octen-8b-additions
   timeout_seconds: 21600
   poll_interval_seconds: 120
   metrics_file: hybrid_manifest.json

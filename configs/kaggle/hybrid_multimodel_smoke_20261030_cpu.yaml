@@ -1,0 +1,26 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-hybrid-multimodel-smoke-20261030",
+    "title": "medxir-hybrid-multimodel-smoke-20261030",
+    "code_file": "src/notebooks/kaggle_hybrid_multimodel_smoke.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": false,
+    "enable_internet": false,
+    "timeout_seconds": 1800,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "hybrid_multimodel_smoke.json"
+    ],
+    "required_outputs": [
+      "hybrid_multimodel_smoke.json"
+    ],
+    "metrics_file": "hybrid_multimodel_smoke.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      }
+    ]
+  }
+}

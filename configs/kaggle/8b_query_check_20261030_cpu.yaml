@@ -1,0 +1,31 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-8b-query-check-20261030-r2",
+    "title": "medxir-8b-query-check-20261030-r2",
+    "code_file": "src/notebooks/kaggle_8b_query_check.ipynb",
+    "kernel_type": "notebook",
+    "immutable_kernel": true,
+    "enable_gpu": false,
+    "enable_internet": false,
+    "kernel_sources": [
+      "dinhbaobao/medxir-encode-queries-qwen8b",
+      "boinhbo/medxir-encode-queries-octen8b"
+    ],
+    "dataset_sources": [],
+    "timeout_seconds": 1800,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "query_outputs_validation.json"
+    ],
+    "required_outputs": [
+      "query_outputs_validation.json"
+    ],
+    "metrics_file": "query_outputs_validation.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      }
+    ]
+  }
+}

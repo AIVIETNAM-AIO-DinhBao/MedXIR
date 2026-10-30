@@ -77,9 +77,38 @@ class Notebook(unittest.TestCase):
                    USE_BM25=True, BM25_ACTIVE=False, USE_RERANK=False, QUERY_TEXT=['q'],
                    DENSE_FULL_IDS=np.array([['a', 'b']]), SUB_LISTS=[[]], PRF_IDS=None,
                    BM25_IDS=[[]], RRF_K=60, W_SUB=0.5, W_PRF=0.5, W_BM25=0.3, POOL_MAX=600)
+        env.update(ACTIVE_MODEL_WEIGHTS={'qwen4b': 1.0}, model_candidate_lists=hr.model_candidate_lists,
+                   MODEL_RESULTS={'qwen4b': dict(full_ids=[['a','b']], sub_lists=[[]], prf_ids=None)})
         exec(build_hybrid_notebook.FUSE, env)
         self.assertTrue(env['ONLY_DENSE'])
         self.assertEqual([cid for cid, _ in env['POOLS'][0]], ['a', 'b'])
+
+    def test_weighted_models_and_bm25_are_each_counted_once(self):
+        import numpy as np
+        results = {'qwen4b': dict(full_ids=[['a','b']], sub_lists=[[]], prf_ids=None),
+                   'qwen8b': dict(full_ids=[['b','a']], sub_lists=[[]], prf_ids=None)}
+        env = dict(np=np, rrf=hr.rrf, model_candidate_lists=hr.model_candidate_lists,
+                   ACTIVE_MODEL_WEIGHTS={'qwen4b': .25, 'qwen8b': .75}, MODEL_RESULTS=results,
+                   USE_QUERY_SPLIT=False, USE_PRF=False, BM25_ACTIVE=True, USE_RERANK=False,
+                   QUERY_TEXT=['q'], BM25_IDS=[['a']], RRF_K=60, W_SUB=.5, W_PRF=.5, W_BM25=.3, POOL_MAX=600)
+        exec(build_hybrid_notebook.FUSE, env)
+        scores = dict(env['FUSED'][0])
+        self.assertAlmostEqual(scores['a'], .25/61 + .75/62 + .3/61)
+        self.assertAlmostEqual(scores['b'], .25/62 + .75/61)
+        self.assertFalse(env['ONLY_DENSE'])
+
+    def test_model_weights_change_plain_fusion_without_auxiliary_lists(self):
+        import numpy as np
+        results = {'qwen4b': dict(full_ids=[['a','b']], sub_lists=[[]], prf_ids=None),
+                   'qwen8b': dict(full_ids=[['b','a']], sub_lists=[[]], prf_ids=None)}
+        for weights, expected in [({'qwen4b':.1,'qwen8b':.9},'b'),({'qwen4b':.9,'qwen8b':.1},'a')]:
+            env=dict(np=np,rrf=hr.rrf,model_candidate_lists=hr.model_candidate_lists,
+                     ACTIVE_MODEL_WEIGHTS=weights,MODEL_RESULTS=results,USE_QUERY_SPLIT=False,
+                     USE_PRF=False,BM25_ACTIVE=False,USE_RERANK=False,QUERY_TEXT=['q'],
+                     BM25_IDS=[[]],RRF_K=60,W_SUB=.5,W_PRF=.5,W_BM25=.3,POOL_MAX=600)
+            exec(build_hybrid_notebook.FUSE,env)
+            self.assertFalse(env['ONLY_DENSE'])
+            self.assertEqual(env['FUSED'][0][0][0],expected)
 
     def test_every_code_cell_parses_and_config_is_first(self):
         nb = build_hybrid_notebook.notebook(build_hybrid_notebook.CELLS)
