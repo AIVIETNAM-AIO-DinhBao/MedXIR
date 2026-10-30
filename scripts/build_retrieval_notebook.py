@@ -384,7 +384,16 @@ def main():
     parser.add_argument('--notebooks', type=Path, default=ROOT / 'src' / 'notebooks')
     args = parser.parse_args()
     args.notebooks.mkdir(parents=True, exist_ok=True)
-    for name, cells in [('kaggle_encode_queries_4b.ipynb', ENCODE_CELLS), ('kaggle_search_4b.ipynb', SEARCH_CELLS)]:
+    # The 0.6B and 8B encode notebooks are the 4B one with the packaged model swapped; their corpus vectors were
+    # embedded with the same pooling and max length.
+    # Octen-Embedding-8B uses the same query instruction format as Qwen3-Embedding (config_sentence_transformers.json).
+    def swap(model_dir):
+        return [(kind, text.replace('Qwen3-Embedding-4B', model_dir)) for kind, text in ENCODE_CELLS]
+
+    for name, cells in [('kaggle_encode_queries_4b.ipynb', ENCODE_CELLS), ('kaggle_search_4b.ipynb', SEARCH_CELLS),
+                        ('kaggle_encode_queries_06b.ipynb', swap('Qwen3-Embedding-0.6B')),
+                        ('kaggle_encode_queries_qwen8b.ipynb', swap('Qwen3-Embedding-8B')),
+                        ('kaggle_encode_queries_octen8b.ipynb', swap('Octen-Embedding-8B'))]:
         output = args.notebooks / name
         output.write_text(json.dumps(notebook(cells), ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'{output}: {len(cells)} cells')

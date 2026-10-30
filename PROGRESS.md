@@ -1,13 +1,16 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 29/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
+**Cập nhật:** 30/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
+
+> **Hai hướng song song từ 27/10.** (A) Hybrid + corpus v2 (notebook hybrid, `expand_chunks.py`): tốt nhất **0,2437** (`v2 nb60-d200`), mục "Hybrid retrieval và ghép chunk — 27–29/10/2026". (B) Ensemble 8B + cửa sổ + PRF + biến thể query bằng LLM trên corpus v1 (`fuse_scores.py`, chạy local): tốt nhất **0,2444** (`var-all-b1-d200-c70-x1`), mục "Ensemble 8B, cửa sổ, PRF và biến thể query — 27–30/10/2026" và [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Hai hướng chưa được ghép: vector Octen-8B và Qwen3-Embedding-8B chỉ phủ corpus v1.
 
 ## Bàn giao
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,2235** (`expand nb60`: hybrid bật hết + ghép chunk liền kề cho 60 chunk đầu). Chi tiết ở mục "Hybrid retrieval và ghép chunk — 27–29/10/2026" cuối file.
-- Lịch sử điểm chính: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235.
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2444** (`var-all-b1-d200-c70-x1`, hướng B, corpus v1). Hướng A trên corpus v2: 0,2437 (`v2 nb60-d200`).
+- Lịch sử điểm hướng A: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235 → nb60-drr-bge 0,2253 → v2 nb60-d200 0,2437.
+- Lịch sử điểm hướng B: d200-c150 0,1847 → ens4-b1 0,1975 → ens4-b1-x1 (cửa sổ 3 chunk) 0,2410 → Octen-PRF 0,2429 → biến thể LLM 0,2444.
 - **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
 - Hạn public 30–31/10, nộp hệ thống 04/11. Quota 10 lượt/ngày; hỏi trước khi nộp.
 - File mới từ 27/10 chưa commit (xem mục 5).
@@ -77,7 +80,15 @@ Mục cũ (chọn chunk từ pool top-500, gộp điểm doc, trọng số BM25)
 
 | File | Đã nộp | Điểm | Ghi chú |
 |---|---|---:|---|
-| **expand nb60** (`R2/submission/chunk concat/medxir-expand-nb60-submission.zip`) | Có | **0,2235** | **Mốc tốt nhất** |
+| **var-all-b1-d200-c70-x1** (`artifacts/submission/`) | Có | **0,2444** | **Mốc tốt nhất** (hướng B) |
+| ens4-prfoct-b1-d200-c70-x1 | Có | 0,2429 | |
+| ens4-b1-d200-c70-x1 | Có | 0,2410 | |
+| only8b-var-b1-d200-c70-x1 | Chưa nộp | | Ablation: bỏ 4B và 0.6B |
+| var-all-b1-d200-c50-x2 | Chưa nộp | | Ablation: cửa sổ 5 chunk, 50 cửa sổ |
+| ens4-icd02-b1-d200-c70-x1, q8-oct-bm25-b1-d200-c70-x1 | Chưa nộp | | |
+| Các bài hướng B khác từ 27/10 | Có, đã xóa file | | Điểm ở docs/EXPERIMENTS.md; dựng lại bằng `fuse_scores.py` |
+| **v2 nb60-d200** (`R2/submission/v2/`) | Có | 0,2437 | Mốc tốt nhất hướng A |
+| expand nb60 (`R2/submission/chunk concat/medxir-expand-nb60-submission.zip`) | Có | 0,2235 | |
 | expand nb30 / wholedoc | Có | 0,2184 / 0,2065 | Cùng thư mục |
 | expand nb0 / nb10 | Chưa nộp | | |
 | hybrid bật hết (`R2/submission/full-config/`) | Có | 0,1965 | |
@@ -758,4 +769,38 @@ Chạy Kaggle CPU, input `medxir-chunk-corpus` + output hybrid (`pool.parquet` v
 - Doc recall 0,47 là trần chung của mọi bài hybrid; xếp hạng doc là nút thắt. Ưu tiên số một: tăng doc recall (~0,56).
 - Small-to-big: giữ chunk 350/50 để search, ghép thành đoạn dài khi nộp. Không cắt lại corpus.
 - Kernel embed 8B của nhóm đã có (Qwen3-8B, Octen-8B s0–s2 + query, ICD Octen) nhưng chưa kiểm tra output. Máy local hiện không có token `boinhbo` (`~/.config/agent-auto-research/kaggle/boinhbo.token`) nên chưa kiểm tra được qua `tools.kaggle`.
+
+## Ensemble 8B, cửa sổ, PRF và biến thể query — 27–30/10/2026
+
+Hướng B, toàn bộ trên corpus v1 (2,62 triệu chunk). Nhật ký đầy đủ 27–29/10 ở [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md); mục này tóm tắt và thêm phần 29–30/10. Ghi chú: máy này có token `boinhbo` và `dinhbaobao`, các kernel 8B ở mục cuối phần hướng A đã chạy xong và dùng ở đây.
+
+### Cách làm
+
+- Mỗi nguồn cho top-500 chunk mỗi query, lưu ở `artifacts/submission/candidates-*-k500.npz`. Tìm kiếm chính xác trên CPU local theo khối (`retrieve_local_8b.py`, đỉnh RAM 5,4 GB, 2,5 phút mỗi lần).
+- `scripts/fuse_scores.py`: min-max điểm từng nguồn trong từng query, cộng theo trọng số; doc = chunk tốt nhất + 1,0 × (chunk thứ 2 + thứ 3) (`--doc-beta`); `--context 1` nộp mỗi chunk kèm chunk liền trước và sau (cửa sổ 3 chunk), bỏ chunk đã nằm trong cửa sổ cao hơn; 70 cửa sổ ≈ 92 MB zip.
+- **PRF** (`scripts/prf_local_8b.py`): q' = chuẩn hóa(q + 0,3 × trung bình vector của 5 chunk đầu danh sách ens4), dùng vector corpus của chính model đó. Cosine(q, q') trung bình 0,990; top-20 đổi khoảng 4/20.
+- **Biến thể query bằng LLM** (`scripts/build_variants_notebook.py` → `kaggle_query_variants.ipynb`, exp_0023, 16 phút RTX Pro 6000): Qwen3-8B (thinking tắt, greedy, prompt tiếng Việt kèm một ví dụ) sinh JSON cho mỗi query: `question` (câu hỏi chuẩn hóa, trung vị 16 từ), `terms` (thuật ngữ y khoa, 20 từ), `passage` (đoạn HyDE, 93 từ). 1.199/1.200 parse được. Octen-8B và Qwen3-Embedding-8B encode `question`, `terms` như query và `passage` như tài liệu. `scripts/retrieve_variants_8b.py` tìm local. Top-20 trùng với query gốc (Octen): question 14,1; passage 10,1; terms 5,2. Có thuật ngữ bịa ("thủy đậu răng", "tràng phù") nên trọng số biến thể nhỏ.
+- Package mới: `boinhbo/medxir-package-qwen3llm8b` (Qwen/Qwen3-8B, sha b968826, 16,4 GB, exp_0021). Qwen3-14B (~30 GB) vượt giới hạn 20 GB của `/kaggle/working`.
+
+### Kết quả leaderboard (cộng dồn)
+
+| Bài | Thành phần | FINAL | Doc F2 | Chunk F2 | Doc R | Chunk P | Chunk R |
+|---|---|---:|---:|---:|---:|---:|---:|
+| ens4-b1 | 4B 0,25 · Octen 0,35 · 0.6B 0,15 · BM25 0,25 | 0,1975 | 0,2788 | 0,1163 | 0,4789 | 0,0719 | 0,1820 |
+| ens4-b1-x1 | + cửa sổ 3 chunk × 70 | 0,2410 | 0,2788 | 0,2033 | 0,4789 | 0,2053 | 0,2426 |
+| ens5-b1-x1 | + Qwen3-Embedding-8B 0,20 | 0,2406 | 0,2775 | 0,2037 | 0,4775 | 0,2049 | 0,2435 |
+| ens4-prfoct-b1-x1 | ens4-b1-x1, Octen → Octen-PRF | 0,2429 | 0,2804 | 0,2055 | 0,4811 | 0,2086 | 0,2459 |
+| **var-all-b1-x1** | 4B 0,20 · Octen-PRF 0,27 · 0.6B 0,10 · BM25 0,20 · Octen q/p/t 0,06/0,06/0,015 · Qwen-8B q/p/t 0,04/0,04/0,015 | **0,2444** | 0,2828 | 0,2060 | 0,4849 | 0,2082 | 0,2468 |
+
+Nhận xét: cửa sổ 3 chunk là bước lớn nhất (+0,044). Qwen-8B thêm vào ens4 không giúp (cùng họ với 4B và 0.6B; đổi 10% tâm cửa sổ). PRF và biến thể mỗi bước khoảng +0,002, chủ yếu tăng Doc R. Chưa có ablation cho từng loại biến thể.
+
+### Đã dựng, chưa nộp (ablation)
+
+- `only8b-var-b1-d200-c70-x1`: bỏ 4B và 0.6B (Octen-PRF 0,35 · Qwen-PRF 0,22 · BM25 0,20 · biến thể như var-all). Nếu không thua, pipeline private chỉ cần hai model 8B và BM25.
+- `var-all-b1-d200-c50-x2`: var-all với cửa sổ 5 chunk, 50 cửa sổ (89 MB; mỗi cửa sổ K=2 ≈ 1,76 MB zip). Doc giữ nguyên nên Doc F2 phải bằng 0,2828.
+- Dự kiến tiếp: var-all bỏ `terms`, var-all bỏ `passage`.
+
+### Ghép với hướng A
+
+Corpus v2 cho +0,020 ở hướng A, bằng mọi thay đổi model ở hướng B cộng lại. Corpus v2 là v1 cộng một file chunk additions riêng ([docs/DATA_ADDITIONS_20261029.md](docs/DATA_ADDITIONS_20261029.md)), nên vector 8B của v1 vẫn dùng được. Để dùng ensemble 8B trên v2 cần embed phần chunk thêm vào v2 (~0,27 triệu chunk) bằng Octen-8B và Qwen3-Embedding-8B (khoảng 380 token mỗi chunk ở 19k token/s, ước tính khoảng 1,5 giờ GPU mỗi model), rồi chạy lại BM25 v2, PRF và tìm kiếm biến thể trên v2.
 

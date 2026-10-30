@@ -1,0 +1,16 @@
+# RTX Pro 6000, Internet OFF: Octen-Embedding-8B embeds the 66 ICD-10 chapter descriptions (a few minutes).
+kernel:
+  id: boinhbo/medxir-embed-icd-octen8b
+  title: medxir embed icd octen8b
+  code_file: src/notebooks/kaggle_embed_icd_octen8b.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-package-octen8b]
+  timeout_seconds: 3600
+  poll_interval_seconds: 60
+  fetch_files: [icd_vectors.npy, icd_rows.json]
+  required_outputs: [icd_vectors.npy, icd_rows.json]

@@ -1,0 +1,31 @@
+# Qwen3-8B writes three variants per query (question, terms, passage); Octen-8B and Qwen3-Embedding-8B encode them.
+# Outputs feed scripts/retrieve_local_8b.py-style local search (see scripts/build_variants_notebook.py).
+kernel:
+  id: boinhbo/medxir-query-variants
+  title: medxir query variants
+  code_file: src/notebooks/kaggle_query_variants.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-package-qwen3llm8b, boinhbo/medxir-package-octen8b, boinhbo/medxir-package-qwen8b]
+  dataset_sources: [boinhbo/medxir-retrieval-inputs]
+  timeout_seconds: 7200
+  poll_interval_seconds: 60
+  fetch_files:
+    - progress.txt
+    - faulthandler.txt
+    - variants.parquet
+    - query_ids.json
+    - vectors-octen8b-question.npy
+    - vectors-octen8b-terms.npy
+    - vectors-octen8b-passage.npy
+    - vectors-qwen8b-question.npy
+    - vectors-qwen8b-terms.npy
+    - vectors-qwen8b-passage.npy
+  required_outputs:
+    - variants.parquet
+    - vectors-octen8b-question.npy
+    - vectors-qwen8b-passage.npy

@@ -1,0 +1,17 @@
+# RTX Pro 6000, Internet OFF: qwen8b (8B), shard 0 of 3 over the 9 chunk parts (index % 3 == 0).
+# Run the shards one after another: one GPU session at a time per account. Output ~7 GiB per shard.
+kernel:
+  id: boinhbo/medxir-embed-corpus-qwen8b-s0
+  title: medxir embed corpus qwen8b s0
+  code_file: src/notebooks/kaggle_embed_corpus_qwen8b_s0.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources: [boinhbo/medxir-chunk-corpus, boinhbo/medxir-package-qwen8b]
+  timeout_seconds: 36000
+  poll_interval_seconds: 600
+  expected_hardware_contains: "6000"
+  fetch_files: [embed_manifest.json]
+  required_outputs: [embed_manifest.json]
