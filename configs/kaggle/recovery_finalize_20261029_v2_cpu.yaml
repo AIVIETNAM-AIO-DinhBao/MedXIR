@@ -1,0 +1,36 @@
+kernel:
+  id: ntklinhfitus/medxir-recovery-finalize-20261029-v2
+  title: medxir-recovery-finalize-20261029-v2
+  code_file: src/notebooks/kaggle_recovery_finalize_20261029_v2.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  dataset_sources:
+    - ntklinhfitus/medxir-chunk-corpus
+    - ntklinhfitus/medxir-recovery-inputs-20261029
+  kernel_sources: [ntklinhfitus/medxir-recovery-release-20261029-v2]
+  timeout_seconds: 28800
+  poll_interval_seconds: 60
+  fetch_files:
+    - recovery_release_20261029_v2/release_manifest.json
+    - recovery_release_20261029_v2/chunk_corpus_additions_20261029_v2.parquet
+    - recovery_release_20261029_v2/documents_additions_20261029_v2.parquet
+    - recovery_release_20261029_v2/hash_groups_additions_20261029_v2.parquet
+    - recovery_release_20261029_v2/aliases_to_existing_20261029_v2.parquet
+    - recovery_release_20261029_v2/embedding_todo_20261029_v2.parquet
+    - recovery_release_20261029_v2/needs_review.jsonl.gz
+    - recovery_release_20261029_v2/vi_crawl_ids_not_in_release.json
+    - recovery_release_20261029_v2/file_audit.json
+    - recovery_release_20261029_v2/unresolved_recovery_ids_20261029_v2.parquet
+    - recovery_release_20261029_v2/parent_file_audit.json
+  required_outputs:
+    - recovery_release_20261029_v2/release_manifest.json
+    - recovery_release_20261029_v2/chunk_corpus_additions_20261029_v2.parquet
+    - recovery_release_20261029_v2/documents_additions_20261029_v2.parquet
+    - recovery_release_20261029_v2/hash_groups_additions_20261029_v2.parquet
+
+  kernel_source_expectations:
+    - kernel: ntklinhfitus/medxir-recovery-release-20261029-v2
+      version: 1
+      manifest: recovery_release_20261029_v2/release_manifest.json
+      manifest_sha256: 95c897f5d75eac361679ffbfcc6ae4899370d38cd2b8c7592fd6965aa4ad348f

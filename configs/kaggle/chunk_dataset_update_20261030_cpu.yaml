@@ -1,0 +1,49 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-chunk-dataset-update-20261030",
+    "title": "medxir-chunk-dataset-update-20261030",
+    "code_file": "src/notebooks/kaggle_chunk_dataset_update.ipynb",
+    "kernel_type": "notebook",
+    "enable_gpu": false,
+    "enable_internet": false,
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus"
+    ],
+    "kernel_sources": [
+      "ntklinhfitus/medxir-recovery-finalize-20261029-v2"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "ntklinhfitus/medxir-recovery-finalize-20261029-v2",
+        "version": 1,
+        "manifest": "recovery_release_20261029_v2/release_manifest.json",
+        "manifest_sha256": "1e6e2e710e6355d769d8fad7cc57e21c9400d6d029daab91058438d5f3e8f88f"
+      }
+    ],
+    "timeout_seconds": 3600,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "chunk_dataset_update_manifest.json",
+      "dataset_payload.zip"
+    ],
+    "required_outputs": [
+      "chunk_dataset_update_manifest.json",
+      "dataset_payload.zip"
+    ],
+    "metrics_file": "chunk_dataset_update_manifest.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      },
+      {
+        "path": "total_chunks",
+        "value": 2891958
+      },
+      {
+        "path": "chunk_parts",
+        "value": 12
+      }
+    ]
+  }
+}

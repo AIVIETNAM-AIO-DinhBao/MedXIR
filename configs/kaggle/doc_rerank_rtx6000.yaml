@@ -1,0 +1,33 @@
+# Document rerank on the hybrid pool (scripts/build_doc_rerank_notebook.py): candidate documents around the
+# 200 cut scored by DOC_RERANKERS, then nb60 ZIPs with RRF-fused document lists. RTX Pro 6000 is offered only
+# with the competition attached and Internet OFF. bge on ranks 0-400: 25 min (29/10, FINAL 0.2253); Qwen3-Reranker-4B
+# on the zone 120-360 lost (0.2176). Corpus v2: the chunk corpus must be the one the hybrid run used, and the hybrid
+# run's outputs (pool.parquet, medxir-hybrid-submission) come from an uploaded dataset, exactly one of each; check
+# its slug before pushing.
+kernel:
+  id: boinhbo/medxir-doc-rerank
+  title: medxir doc rerank
+  code_file: src/notebooks/kaggle_doc_rerank.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  expected_hardware_contains: "6000"
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  kernel_sources:
+    - boinhbo/medxir-package-rerankers
+  dataset_sources: [boinhbo/medxir-retrieval-inputs, ntklinhfitus/medxir-chunk-corpus-v2, boinhbo/medxir-hybrid-v2]
+  timeout_seconds: 21600
+  poll_interval_seconds: 120
+  metrics_file: expand_manifest.json
+  fetch_files:
+    - progress.txt
+    - faulthandler.txt
+    - expand_manifest.json
+    - doc_rank.parquet
+    - medxir-expand-nb60-submission.zip
+    - medxir-expand-nb60-drr-bge-submission.zip
+    - medxir-expand-nb60-drr-bge-only-submission.zip
+  required_outputs:
+    - doc_rank.parquet
+    - expand_manifest.json

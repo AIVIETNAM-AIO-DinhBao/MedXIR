@@ -1,0 +1,15 @@
+kernel:
+  id: ntklinhfitus/medxir-delta-gpu-probe-20261030
+  title: medxir-delta-gpu-probe-20261030
+  code_file: src/notebooks/kaggle_delta_gpu_probe.ipynb
+  kernel_type: notebook
+  enable_gpu: true
+  enable_internet: false
+  machine_shape: NvidiaRtxPro6000
+  competition_sources: [arc-prize-2026-arc-agi-3]
+  expected_hardware_contains: "6000"
+  timeout_seconds: 900
+  poll_interval_seconds: 30
+  fetch_files: [hardware.json]
+  required_outputs: [hardware.json]
+  metrics_file: hardware.json

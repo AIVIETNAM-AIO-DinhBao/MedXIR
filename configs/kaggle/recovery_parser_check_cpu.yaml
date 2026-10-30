@@ -1,0 +1,17 @@
+kernel:
+  id: ntklinhfitus/medxir-recovery-parser-check
+  title: medxir-recovery-parser-check
+  code_file: src/notebooks/kaggle_recovery_parser_check.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  kernel_sources: [ntklinhfitus/medxir-recovery-residual-probe]
+  kernel_source_expectations:
+    - kernel: ntklinhfitus/medxir-recovery-residual-probe
+      version: 1
+      manifest: residual_probe/summary.json
+      manifest_sha256: e07ef19f9f8322cfa3b3e8f1655ccbf727f7d5b7de96d411ea6efd7a95555c58
+  timeout_seconds: 600
+  poll_interval_seconds: 15
+  fetch_files: [parser_check.json]
+  required_outputs: [parser_check.json]

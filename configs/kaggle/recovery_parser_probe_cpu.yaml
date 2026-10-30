@@ -1,0 +1,15 @@
+kernel:
+  id: ntklinhfitus/medxir-recovery-parser-probe
+  title: medxir-recovery-parser-probe
+  code_file: src/notebooks/kaggle_recovery_parser_probe.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  dataset_sources: [ntklinhfitus/medxir-data-inventory-20261029]
+  timeout_seconds: 1800
+  poll_interval_seconds: 60
+  fetch_files:
+    - recovery_parser_probe/sample_html.zip
+    - recovery_parser_probe/parser_samples.json
+    - recovery_parser_probe/summary.json
+  required_outputs: [recovery_parser_probe/sample_html.zip]

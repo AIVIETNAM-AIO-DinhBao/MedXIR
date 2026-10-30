@@ -1,0 +1,20 @@
+kernel:
+  id: ntklinhfitus/medxir-source-inventory-20261029
+  title: medxir-source-inventory-20261029
+  code_file: src/notebooks/kaggle_source_inventory_20261029.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  dataset_sources: [ntklinhfitus/medxir-data-inventory-20261029]
+  timeout_seconds: 5400
+  poll_interval_seconds: 60
+  fetch_files:
+    - source_inventory_20261029/summary.json
+    - source_inventory_20261029/source_matches.parquet
+    - source_inventory_20261029/unresolved.parquet
+    - source_inventory_20261029/file_audit.json
+    - source_inventory_20261029/parser_samples.json
+  required_outputs:
+    - source_inventory_20261029/summary.json
+    - source_inventory_20261029/source_matches.parquet
+    - source_inventory_20261029/file_audit.json

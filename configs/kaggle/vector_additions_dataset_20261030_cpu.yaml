@@ -1,0 +1,49 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-vector-additions-dataset-20261030",
+    "title": "medxir-vector-additions-dataset-20261030",
+    "code_file": "src/notebooks/kaggle_vector_additions_dataset.ipynb",
+    "kernel_type": "notebook",
+    "enable_gpu": false,
+    "enable_internet": false,
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus-v2"
+    ],
+    "kernel_sources": [
+      "ntklinhfitus/medxir-qwen4b-additions-20261030"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "ntklinhfitus/medxir-qwen4b-additions-20261030",
+        "version": 1,
+        "manifest": "incremental_embed_manifest.json",
+        "manifest_sha256": "f3010c10fca937d697d3d9315eaa4a7dc678711f04345aa97c6d0b048bd8b492"
+      }
+    ],
+    "timeout_seconds": 3600,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "vector_repack_validation.json",
+      "vector_payload.zip"
+    ],
+    "required_outputs": [
+      "vector_repack_validation.json",
+      "vector_payload.zip"
+    ],
+    "metrics_file": "vector_repack_validation.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      },
+      {
+        "path": "chunks",
+        "value": 270405
+      },
+      {
+        "path": "new_model_forward_inputs",
+        "value": 0
+      }
+    ]
+  }
+}

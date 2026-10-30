@@ -1,0 +1,18 @@
+kernel:
+  id: ntklinhfitus/medxir-recovery-residual-probe
+  title: medxir-recovery-residual-probe
+  code_file: src/notebooks/kaggle_recovery_residual_probe.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: true
+  dataset_sources: [ntklinhfitus/medxir-recovery-inputs-20261029]
+  kernel_sources: [ntklinhfitus/medxir-recovery-release-20261029-v2]
+  kernel_source_expectations:
+    - kernel: ntklinhfitus/medxir-recovery-release-20261029-v2
+      version: 1
+      manifest: recovery_release_20261029_v2/release_manifest.json
+      manifest_sha256: 95c897f5d75eac361679ffbfcc6ae4899370d38cd2b8c7592fd6965aa4ad348f
+  timeout_seconds: 1200
+  poll_interval_seconds: 30
+  fetch_files: [residual_probe/residual_samples.zip, residual_probe/summary.json]
+  required_outputs: [residual_probe/residual_samples.zip, residual_probe/summary.json]

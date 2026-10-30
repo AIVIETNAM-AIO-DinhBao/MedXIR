@@ -1,0 +1,103 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-qwen4b-additions-20261030",
+    "title": "medxir-qwen4b-additions-20261030",
+    "code_file": "src/notebooks/kaggle_qwen4b_delta.ipynb",
+    "kernel_type": "notebook",
+    "enable_gpu": true,
+    "enable_internet": false,
+    "machine_shape": "NvidiaRtxPro6000",
+    "expected_hardware_contains": "6000",
+    "competition_sources": [
+      "arc-prize-2026-arc-agi-3"
+    ],
+    "kernel_sources": [
+      "ntklinhfitus/medxir-qwen4b-delta-plan-20261030",
+      "boinhbo/medxir-package-models"
+    ],
+    "kernel_source_expectations": [
+      {
+        "kernel": "ntklinhfitus/medxir-qwen4b-delta-plan-20261030",
+        "version": 1,
+        "manifest": "qwen4b_additions_plan/embedding_plan_manifest.json",
+        "manifest_sha256": "1037d99da423ed266e6952e299b8ce18a4635823836c28c8000507e2e694517b"
+      },
+      {
+        "kernel": "boinhbo/medxir-package-models",
+        "version": 1,
+        "manifest": "models/MODELS.json",
+        "manifest_sha256": "baa6628921cebc1d2f222f4539ac4c5638f0a16c38fbd6d477285f4a84cd1077"
+      }
+    ],
+    "timeout_seconds": 21600,
+    "poll_interval_seconds": 60,
+    "fetch_files": [
+      "incremental_embed_manifest.json",
+      "vectors/additions-20261029-v2-part-000.npy",
+      "vectors/additions-20261029-v2-part-000-ids.parquet",
+      "vectors/additions-20261029-v2-part-001.npy",
+      "vectors/additions-20261029-v2-part-001-ids.parquet",
+      "vectors/additions-20261029-v2-part-002.npy",
+      "vectors/additions-20261029-v2-part-002-ids.parquet",
+      "vectors/additions-20261029-v2-part-003.npy",
+      "vectors/additions-20261029-v2-part-003-ids.parquet",
+      "vectors/additions-20261029-v2-part-004.npy",
+      "vectors/additions-20261029-v2-part-004-ids.parquet",
+      "vectors/additions-20261029-v2-part-005.npy",
+      "vectors/additions-20261029-v2-part-005-ids.parquet",
+      "vectors/additions-20261029-v2-part-006.npy",
+      "vectors/additions-20261029-v2-part-006-ids.parquet",
+      "vectors/additions-20261029-v2-part-007.npy",
+      "vectors/additions-20261029-v2-part-007-ids.parquet",
+      "vectors/additions-20261029-v2-part-008.npy",
+      "vectors/additions-20261029-v2-part-008-ids.parquet",
+      "vectors/additions-20261029-v2-part-009.npy",
+      "vectors/additions-20261029-v2-part-009-ids.parquet",
+      "vectors/additions-20261029-v2-part-010.npy",
+      "vectors/additions-20261029-v2-part-010-ids.parquet"
+    ],
+    "required_outputs": [
+      "incremental_embed_manifest.json",
+      "vectors/additions-20261029-v2-part-000.npy",
+      "vectors/additions-20261029-v2-part-000-ids.parquet",
+      "vectors/additions-20261029-v2-part-001.npy",
+      "vectors/additions-20261029-v2-part-001-ids.parquet",
+      "vectors/additions-20261029-v2-part-002.npy",
+      "vectors/additions-20261029-v2-part-002-ids.parquet",
+      "vectors/additions-20261029-v2-part-003.npy",
+      "vectors/additions-20261029-v2-part-003-ids.parquet",
+      "vectors/additions-20261029-v2-part-004.npy",
+      "vectors/additions-20261029-v2-part-004-ids.parquet",
+      "vectors/additions-20261029-v2-part-005.npy",
+      "vectors/additions-20261029-v2-part-005-ids.parquet",
+      "vectors/additions-20261029-v2-part-006.npy",
+      "vectors/additions-20261029-v2-part-006-ids.parquet",
+      "vectors/additions-20261029-v2-part-007.npy",
+      "vectors/additions-20261029-v2-part-007-ids.parquet",
+      "vectors/additions-20261029-v2-part-008.npy",
+      "vectors/additions-20261029-v2-part-008-ids.parquet",
+      "vectors/additions-20261029-v2-part-009.npy",
+      "vectors/additions-20261029-v2-part-009-ids.parquet",
+      "vectors/additions-20261029-v2-part-010.npy",
+      "vectors/additions-20261029-v2-part-010-ids.parquet"
+    ],
+    "metrics_file": "incremental_embed_manifest.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "op": "eq",
+        "value": true
+      },
+      {
+        "path": "total_rows",
+        "op": "eq",
+        "value": 270405
+      },
+      {
+        "path": "nan_rows",
+        "op": "eq",
+        "value": 0
+      }
+    ]
+  }
+}

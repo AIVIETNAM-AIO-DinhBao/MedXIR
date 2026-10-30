@@ -1,0 +1,36 @@
+{
+  "kernel": {
+    "id": "ntklinhfitus/medxir-hybrid-input-check-20261030",
+    "title": "medxir-hybrid-input-check-20261030",
+    "code_file": "src/notebooks/kaggle_hybrid_input_check.ipynb",
+    "kernel_type": "notebook",
+    "enable_gpu": false,
+    "enable_internet": false,
+    "dataset_sources": [
+      "ntklinhfitus/medxir-chunk-corpus-v2",
+      "ntklinhfitus/medxir-vectors-qwen3-4b-additions",
+      "boinhbo/medxir-vectors-qwen3-4b-s0",
+      "boinhbo/medxir-vectors-qwen3-4b-s1",
+      "boinhbo/medxir-vectors-qwen3-4b-s2"
+    ],
+    "timeout_seconds": 1800,
+    "poll_interval_seconds": 30,
+    "fetch_files": [
+      "hybrid_input_check.json"
+    ],
+    "required_outputs": [
+      "hybrid_input_check.json"
+    ],
+    "metrics_file": "hybrid_input_check.json",
+    "json_checks": [
+      {
+        "path": "complete",
+        "value": true
+      },
+      {
+        "path": "vector_count",
+        "value": 2891958
+      }
+    ]
+  }
+}

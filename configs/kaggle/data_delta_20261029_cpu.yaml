@@ -1,0 +1,23 @@
+# Isolated CPU delta using the chunk corpus owned by ntklinhfitus.
+kernel:
+  id: ntklinhfitus/medxir-data-delta-20261029
+  title: medxir-data-delta-20261029
+  code_file: src/notebooks/kaggle_data_delta_20261029.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  dataset_sources: [ntklinhfitus/medxir-chunk-corpus]
+  timeout_seconds: 1800
+  poll_interval_seconds: 60
+  fetch_files:
+    - data_delta_20261029/delta_chunk_manifest.json
+    - data_delta_20261029/new_chunks.parquet
+    - data_delta_20261029/new_hash_groups.parquet
+    - data_delta_20261029/alias_candidates.parquet
+    - data_delta_20261029/embedding_todo.parquet
+  required_outputs:
+    - data_delta_20261029/delta_chunk_manifest.json
+    - data_delta_20261029/new_chunks.parquet
+    - data_delta_20261029/new_hash_groups.parquet
+    - data_delta_20261029/alias_candidates.parquet
+    - data_delta_20261029/embedding_todo.parquet

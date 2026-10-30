@@ -1,16 +1,16 @@
 # Tiến trình MedXIR
 
-**Cập nhật:** 26/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
+**Cập nhật:** 29/10/2026 (UTC+07:00). Bản bàn giao: phần "Bàn giao" bên dưới là trạng thái hiện tại. Các mục từ 1 trở đi là nhật ký theo thời gian; một số khẳng định cũ (ví dụ "đang chạy", "chưa có điểm" ở mục 16) đã lỗi thời và được ghi đè bởi phần bàn giao.
 
 ## Bàn giao
 
 ### 1. Trạng thái
 
-- **Điểm tốt nhất trên leaderboard: FINAL 0,1847** (`d200-c150`: dense Qwen3-Embedding-4B; 150 chunk là top-150 dense, 200 doc lấy từ top-500 dense).
-- Lịch sử điểm chính: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847.
-- Reranker **không** cải thiện gì: các bài rerank đã nộp (`rr*`) có cùng tập chunk và tập doc với dense nên điểm bằng hệt (xem đính chính cuối PROGRESS). Không cần nộp lại các bài này.
-- Nhiều lượt nộp trong ngày đã bị dùng cho các bài rerank vô ích. Quota: 10 lượt/ngày; số lượt còn lại hôm nay do bạn xác nhận.
-- Không có job Kaggle nào đang chạy. Không có nhãn cục bộ, nên mọi thay đổi chỉ đo được qua leaderboard.
+- **Điểm tốt nhất trên leaderboard: FINAL 0,2235** (`expand nb60`: hybrid bật hết + ghép chunk liền kề cho 60 chunk đầu). Chi tiết ở mục "Hybrid retrieval và ghép chunk — 27–29/10/2026" cuối file.
+- Lịch sử điểm chính: baseline 0,0818 → d100 0,1453 → d200 0,1517 → d200-c100 0,1783 → d200-c150 0,1847 → hybrid 0,1965 → expand nb30 0,2184 → expand nb60 0,2235.
+- **Nút thắt là doc recall (~0,47)**, bằng nhau ở mọi bài hybrid. Mục tiêu tiếp theo: doc recall ~0,56 (ensemble embedding 4B + Qwen3-8B + Octen-8B).
+- Hạn public 30–31/10, nộp hệ thống 04/11. Quota 10 lượt/ngày; hỏi trước khi nộp.
+- File mới từ 27/10 chưa commit (xem mục 5).
 
 ### 2. Metric (quan trọng cho mọi quyết định)
 
@@ -43,6 +43,8 @@
 - `scripts/fuse_dense_bm25.py`: RRF dense + BM25 (`--w-dense`, `--w-bm25`, `--doc-counts`, `--chunk-counts`).
 - `scripts/build_rerank_submission.py`, `scripts/build_rerank_candidates.py`, `scripts/build_rerank_notebooks.py`: nhánh reranker, đã dừng.
 - `scripts/bm25_vi.py`: BM25 tiếng Việt (chạy trên Kaggle CPU, không chạy local vì OOM).
+- `scripts/hybrid_retrieval.py` (logic thuần, có test `tests/test_hybrid_retrieval.py`) và `scripts/build_hybrid_notebook.py` → `src/notebooks/kaggle_hybrid_retrieval.ipynb`, config `configs/kaggle/hybrid_retrieval_rtx6000.yaml`. Dense 4B + BM25 + rerank bge-v2-m3 trên pool, toggle ở cell đầu.
+- `scripts/expand_chunks.py` (Kaggle CPU, 3–5 phút): dựng lại phần chunk của bài nộp từ `pool.parquet` (biến thể `nbN`, `wholedoc`), giữ nguyên danh sách doc, giữ ZIP < 99 MB.
 
 ### 6. Kaggle
 
@@ -58,23 +60,30 @@
 - Không rerank hay chạy GPU nếu chưa có kế hoạch cụ thể.
 - Không dùng VPN, xoay IP, hay vượt chặn nguồn (AGENT.md, memory `respect-site-blocks`).
 
-### 8. Hướng tiếp theo: tăng cường retrieval (chưa làm)
+### 8. Hướng tiếp theo (cập nhật 29/10)
 
-Các bước dưới đây chỉ dùng cache local (top-500 dense và BM25), không cần GPU:
+Mục cũ (chọn chunk từ pool top-500, gộp điểm doc, trọng số BM25) đã làm trong notebook hybrid. Thứ tự đề xuất mới:
 
-1. **Chọn 150 chunk trong pool top-500** bằng điểm kết hợp (dense + BM25 với trọng số thấp hơn 1:1), thay vì lấy top-150 dense. Đây là thay đổi tập chunk thật sự nên có thể đổi điểm.
-2. **Tổng hợp điểm doc:** thử max, tổng top-k, hoặc số chunk trong doc, thay vì chỉ max. Đo qua leaderboard, mỗi lượt một biến.
-3. **Trọng số BM25:** `rrf03-d200` đã có (chưa nộp), thử tiếp 0,1–0,3 kèm chọn 150 chunk theo điểm kết hợp.
-4. **Chặn doc tĩnh:** loại doc thuộc nhóm trùng hash quá lớn hoặc các trang điều hướng wiki (`wiki_tail_requires_review`), nếu chúng chiếm slot trong top-150.
-5. Các hướng cần GPU (query rewrite, query đa ngôn ngữ, embed lại): để sau, sau khi cạn các bước trên.
+1. **Kiểm tra output các kernel 8B** (`medxir-embed-corpus-{qwen8b,octen8b}-s0..s2`, `medxir-encode-queries-{qwen8b,octen8b}`, `medxir-embed-icd-octen8b`): đã xong chưa, tên file vector, số chiều (dự kiến 4096), có file ids đi kèm không.
+2. **Notebook ensemble:** search 4B + Qwen3-8B + Octen-8B, gộp RRF, rerank pool, ghép chunk kiểu nb60 trong notebook. Ba bộ vector ~55 GB fp16, vừa GPU 97 GB.
+3. **expand_chunks kết hợp** (chỉ CPU): nguyên văn top-3..5 doc, phần dung lượng còn lại theo nb60.
+4. **d300/d400:** danh sách doc gần như không tốn dung lượng.
+5. **Ghép chunk có chọn lọc:** rerank cả chunk liền kề, chỉ ghép chunk điểm cao.
+6. **Probe tỷ lệ ZH/EN:** ép ≥ ~20% chunk ZH/EN.
+7. **Embed tiêu đề doc VI/ZH** (bỏ hậu tố tên trang như "| Sức Khỏe Cộng Đồng"; EN đã có tiêu đề ở đầu văn bản). Cột `title` trong `Kaggle-Group/archive.zip` → `docs/<lang>/part-v1-*.parquet`.
+8. ICD (Octen): để sau. Cân nhắc tập dev ~100 query nhãn LLM để thử offline.
 
-Mỗi bước: tạo bài nộp, kiểm tra tập chunk/doc khác dense (không chỉ thứ tự), rồi hỏi bạn trước khi nộp.
-
-### 9. Bài nộp hiện có (`artifacts/submission/`)
+### 9. Bài nộp hiện có (`artifacts/submission/` và `R2/submission/`)
 
 | File | Đã nộp | Điểm | Ghi chú |
 |---|---|---:|---|
-| d200-c150 (`medxir-qwen3-4b-d200-c150-submission.zip`) | Có | 0,1847 | Mốc tốt nhất |
+| **expand nb60** (`R2/submission/chunk concat/medxir-expand-nb60-submission.zip`) | Có | **0,2235** | **Mốc tốt nhất** |
+| expand nb30 / wholedoc | Có | 0,2184 / 0,2065 | Cùng thư mục |
+| expand nb0 / nb10 | Chưa nộp | | |
+| hybrid bật hết (`R2/submission/full-config/`) | Có | 0,1965 | |
+| hybrid tắt rerank + BM25 (`R2/submission/no-rerank-bm25/`) | Có | 0,1759 | |
+| probe VI (`R2/submission/probe-vi-chunks/`) | Có | 0,1944 | |
+| d200-c150 (`medxir-qwen3-4b-d200-c150-submission.zip`) | Có | 0,1847 | Mốc dense cũ |
 | d200-c100 | Có | 0,1783 | |
 | d200 / d100 / d50 / d300 / d150 (`d150` chưa nộp) | Có (trừ d150) | | Dense |
 | rrf-d100, rrf-d200, bm25only-d200 | Có | 0,1377 / 0,1433 / 0,0982 | |
@@ -712,3 +721,41 @@ Bài nộp (dựng bằng `scripts/build_rerank_submission.py`, 150 chunk đã s
 Thứ tự nộp đề xuất: rr4b → rr06b → rrbge → rr4b-f05 tùy kết quả trước đó. Mốc hiện tại: d200-c150 dense, FINAL 0,1847.
 
 **Đính chính (26/10):** Các bài `rr4b`, `rr06b`, `rrbge` và `rr4b-f*` không đổi điểm so với dense, vì chúng chỉ đổi thứ tự 150 chunk đã có. Điểm chunk và doc đều theo tập hợp nên không đổi. Kiểm tra: 1.200/1.200 query có cùng tập chunk và cùng tập doc với bản d200-c150 dense. Reranker chỉ có tác dụng khi chọn 150 chunk từ một pool lớn hơn (top-500), không phải khi sắp lại top-150. Cần chạy lại 600.000 cặp (1.200 × 500) cho mỗi model.
+
+## Hybrid retrieval và ghép chunk — 27–29/10/2026
+
+### Notebook hybrid
+
+`src/notebooks/kaggle_hybrid_retrieval.ipynb` (sinh từ `scripts/build_hybrid_notebook.py`, logic ở `scripts/hybrid_retrieval.py`). Cell config có toggle `USE_QUERY_SPLIT`, `USE_CUSTOM_INSTRUCT`, `USE_PRF`, `USE_BM25`, `USE_RERANK`, `DOC_AGG` (max/top3), `LANGS`, `RERANKER`, `N_DOCS=200`, `N_CHUNKS=150`, `POOL_MAX=600`. Vector 4B đọc theo khối 32k dòng qua mmap (RAM ~5,7 GB), search chính xác trên GPU. Output: `pool.parquet` (`query_id`, `chunk_id`, `final_rank`, …), `hybrid_manifest.json`, ZIP bài nộp. Bật hết ~26 phút trên RTX Pro 6000, trong đó rerank bge-v2-m3 720k cặp mất 19 phút.
+
+### Ghép chunk khi nộp (`scripts/expand_chunks.py`)
+
+Chạy Kaggle CPU, input `medxir-chunk-corpus` + output hybrid (`pool.parquet` và bài nộp, nhận cả `.zip` lẫn `.json` vì Kaggle tự giải nén zip). Giữ nguyên danh sách doc, chỉ dựng lại phần chunk:
+- `nbN`: N chunk đầu lấy thêm chunk liền trước và liền sau; các chunk liền nhau ghép thành một đoạn (bỏ overlap theo offset start/end).
+- `wholedoc`: nộp nguyên văn các doc đầu danh sách.
+- Dung lượng mỗi query = bài gốc × 1,08, vòng lặp giữ ZIP < 99 MB. `ONLY = [...]` chọn biến thể.
+
+### Kết quả leaderboard
+
+| Bài | FINAL | Doc R | Chunk R | Chunk P | Nhận xét |
+|---|---:|---:|---:|---:|---|
+| Dense 4B d200-c150 | 0,1847 | ~0,44 | 0,170 | 0,067 | Mốc cũ |
+| Hybrid bật hết | 0,1965 | 0,473 | 0,181 | 0,072 | |
+| Hybrid tắt rerank + BM25 | 0,1759 | 0,433 | 0,159 | 0,061 | Split, PRF, instruct riêng, top3 làm giảm điểm; rerank trên pool sâu mới là phần có ích. 25% chunk ZH |
+| Probe VI (bỏ 7% chunk ZH/EN) | 0,1944 | 0,473 | 0,169 | 0,071 | Recall mất đúng tỷ lệ: chunk ZH/EN trúng ngang chunk VI |
+| expand nb30 | 0,2184 | 0,473 | 0,229 | 0,113 | Biên chunk đang cắt ngang đáp án |
+| **expand nb60** | **0,2235** | 0,473 | 0,224 | 0,142 | Recall đỉnh quanh nb30, nb60 tăng nhờ precision |
+| expand wholedoc | 0,2065 | 0,473 | 0,145 | 0,212 | Doc top có đáp án, nhưng doc có đáp án rải rác ở nhiều hạng |
+| expand nb60-q20-dq20 | 0,2082 | 0,467 | 0,218 | 0,109 | Ép ≥ 20% chunk (theo byte) và doc ZH/EN lấy từ pool: cả recall lẫn precision đều giảm. ZH/EN hạng thấp trúng kém hơn VI bị thay. Bỏ hướng ép suất ngôn ngữ |
+| expand nb60-d300 | 0,2125 | 0,519 | 0,224 | 0,142 | Chunk giữ nguyên, 300 doc: Doc R +0,046 nhưng Doc F2 0,2535 (≈ 0,2755 ở 200 doc). Giữ 200 doc; hạng 200–300 có doc đúng mà rerank doc cần kéo vào |
+| **nb60-drr-bge** (rerank doc bge, RRF 1:1 với hạng cũ) | **0,2253** | 0,479 | 0,224 | 0,142 | `kaggle_doc_rerank` (25 phút). Doc F2 0,279. Thay ~11,6 doc/query |
+| nb60-drr-bge-only (chỉ điểm bge) | 0,2253 | 0,481 | 0,224 | 0,142 | Thay ~25,6 doc/query nhưng chỉ thêm +0,002 Doc R. Mới lấy được ~15% phần +0,046 ở hạng 200–300 |
+| nb60-drr-qwen4b-only (Qwen3-Reranker-4B, vùng 120–360, top 120 giữ nguyên) | 0,2176 | 0,457 | 0,224 | 0,142 | Doc R thấp hơn cả nb60 gốc (−0,016). Qwen-4B kém bge khi chấm cấp doc. Bỏ hướng doc rerank bằng Qwen |
+| **v2 nb60-d200** (corpus v2 2,89M chunk, BM25 vẫn v1, không doc rerank; `R2/submission/v2/`) | **0,2437** | 0,519 | 0,249 | 0,155 | Cùng cấu hình nb60, chỉ đổi corpus: +0,020 FINAL, Doc R +0,046, Chunk R +0,025. Corpus mở rộng là đòn bẩy lớn nhất tới giờ |
+
+### Kết luận
+
+- Doc recall 0,47 là trần chung của mọi bài hybrid; xếp hạng doc là nút thắt. Ưu tiên số một: tăng doc recall (~0,56).
+- Small-to-big: giữ chunk 350/50 để search, ghép thành đoạn dài khi nộp. Không cắt lại corpus.
+- Kernel embed 8B của nhóm đã có (Qwen3-8B, Octen-8B s0–s2 + query, ICD Octen) nhưng chưa kiểm tra output. Máy local hiện không có token `boinhbo` (`~/.config/agent-auto-research/kaggle/boinhbo.token`) nên chưa kiểm tra được qua `tools.kaggle`.
+

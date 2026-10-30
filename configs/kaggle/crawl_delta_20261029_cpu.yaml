@@ -1,0 +1,24 @@
+kernel:
+  id: ntklinhfitus/medxir-crawl-chunks-delta-20261029
+  title: medxir-crawl-chunks-delta-20261029
+  code_file: src/notebooks/kaggle_crawl_delta_20261029.ipynb
+  kernel_type: notebook
+  enable_gpu: false
+  enable_internet: false
+  dataset_sources:
+    - ntklinhfitus/medxir-chunk-corpus
+    - ntklinhfitus/medxir-crawl-delta-20261029
+  timeout_seconds: 1800
+  poll_interval_seconds: 60
+  fetch_files:
+    - crawl_chunk_delta_20261029/delta_chunk_manifest.json
+    - crawl_chunk_delta_20261029/new_chunks.parquet
+    - crawl_chunk_delta_20261029/new_hash_groups.parquet
+    - crawl_chunk_delta_20261029/alias_candidates.parquet
+    - crawl_chunk_delta_20261029/embedding_todo.parquet
+  required_outputs:
+    - crawl_chunk_delta_20261029/delta_chunk_manifest.json
+    - crawl_chunk_delta_20261029/new_chunks.parquet
+    - crawl_chunk_delta_20261029/new_hash_groups.parquet
+    - crawl_chunk_delta_20261029/alias_candidates.parquet
+    - crawl_chunk_delta_20261029/embedding_todo.parquet
